@@ -88,7 +88,7 @@ const STATUS_COLORS = {
 
 const getTypeIcon = (type) => TYPES.find((t) => t.value === type)?.icon || <Handshake fontSize="small" />;
 
-const CollaborationCard = ({ collaboration, onOpen, onPublish, theme, isOwner }) => (
+const CollaborationCard = ({ collaboration, onOpen, onPublish, theme, isOwner, tint }) => (
     <Box
         onClick={onOpen}
         sx={{
@@ -99,12 +99,12 @@ const CollaborationCard = ({ collaboration, onOpen, onPublish, theme, isOwner })
             borderRadius: 3,
             overflow: 'hidden',
             border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-            background: theme.palette.background.paper,
-            boxShadow: theme.tokens?.shadow?.sm,
+            background: tint || theme.palette.background.paper,
+            boxShadow: theme.tokens?.shadow?.md,
             transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             '&:hover': {
                 transform: 'translate(-2px, -2px)',
-                boxShadow: theme.tokens?.shadow?.md,
+                boxShadow: theme.tokens?.shadow?.lg,
             },
         }}
     >
@@ -485,14 +485,17 @@ const Collaborations = () => {
                 ) : (
                     <>
                         <Grid container spacing={3}>
-                            {collaborations.map((c) => {
+                            {collaborations.map((c, idx) => {
                                 const isOwner = user && c.createdBy && (c.createdBy === user._id || c.createdBy?._id === user._id);
+                                const t = theme.palette.brand?.tints || {};
+                                const cycle = [t.rose, t.sky, t.butter, t.mint, t.lavender, t.peach];
                                 return (
                                     <Grid item xs={12} sm={6} md={4} key={c._id}>
                                         <CollaborationCard
                                             collaboration={c}
                                             theme={theme}
                                             isOwner={isOwner}
+                                            tint={cycle[idx % cycle.length]}
                                             onOpen={() => navigate(`/collaborations/${c._id}`)}
                                             onPublish={handlePublish}
                                         />

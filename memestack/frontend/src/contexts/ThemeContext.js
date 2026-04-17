@@ -130,6 +130,35 @@ const status = {
     info:    { main: '#2563EB', dark: '#1D4ED8', light: '#93C5FD' },
 };
 
+// ---------------------------------------------------------------------------
+// Tinted surface palette — soft, legible card backgrounds used to break up
+// pages that would otherwise be wall-to-wall white (or deep navy). Every
+// tint is paired with an `ink` color so text stays readable on it.
+//
+// Use via `theme.palette.brand.tints.<name>` for background and
+// `theme.palette.brand.tints.<name>Ink` for headlines on that surface.
+// ---------------------------------------------------------------------------
+const tints = {
+    light: {
+        lavender:    '#EDE9FE', lavenderInk:    '#5B21B6',
+        peach:       '#FFEDD5', peachInk:       '#9A3412',
+        mint:        '#D1FAE5', mintInk:        '#065F46',
+        sky:         '#DBEAFE', skyInk:         '#1E3A8A',
+        rose:        '#FCE7F3', roseInk:        '#9D174D',
+        butter:      '#FEF3C7', butterInk:      '#78350F',
+    },
+    dark: {
+        // In dark mode the tints are deeper — they have to read as cards on a
+        // near-black canvas, not as washed-out pastels.
+        lavender:    '#2E1B54', lavenderInk:    '#C4B5FD',
+        peach:       '#4A2617', peachInk:       '#FDBA74',
+        mint:        '#0B3A2E', mintInk:        '#6EE7B7',
+        sky:         '#172554', skyInk:         '#93C5FD',
+        rose:        '#4A1935', roseInk:        '#F9A8D4',
+        butter:      '#4A320C', butterInk:      '#FCD34D',
+    },
+};
+
 export const ThemeProvider = ({ children }) => {
     const { user } = useAuth();
     const [mode, setMode] = useState('light');
@@ -214,6 +243,10 @@ export const ThemeProvider = ({ children }) => {
                 gradientSoft: mode === 'light'
                     ? `linear-gradient(135deg, ${accent.primary}14 0%, ${accent.secondary}14 100%)`
                     : `linear-gradient(135deg, ${accent.primary}22 0%, ${accent.secondary}22 100%)`,
+                // Tinted surfaces — see `tints` block at the top of this file
+                // for the full palette. Pair a background with its `…Ink`
+                // counterpart for readable headlines.
+                tints: tints[mode],
             },
         },
         typography: {

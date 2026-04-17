@@ -85,7 +85,7 @@ const resolveImageUrl = (url) => {
     return url;
 };
 
-const TemplateCard = ({ template, onUse, onDownload, onToggleFavorite, isFavorite, isAuth }) => {
+const TemplateCard = ({ template, onUse, onDownload, onToggleFavorite, isFavorite, isAuth, tint }) => {
     const theme = useTheme();
     const navigate = useNavigate();
     const creator = template.createdBy || {};
@@ -99,8 +99,8 @@ const TemplateCard = ({ template, onUse, onDownload, onToggleFavorite, isFavorit
                 borderRadius: 3,
                 overflow: 'hidden',
                 border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-                background: theme.palette.background.paper,
-                boxShadow: theme.tokens?.shadow?.sm,
+                background: tint || theme.palette.background.paper,
+                boxShadow: theme.tokens?.shadow?.md,
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
@@ -441,9 +441,13 @@ const Templates = () => {
                 />
             );
         }
+        const tintList = (() => {
+            const t = theme.palette.brand?.tints || {};
+            return [t.lavender, t.peach, t.mint, t.sky, t.rose, t.butter];
+        })();
         return (
             <Grid container spacing={2.5}>
-                {templates.map((t) => (
+                {templates.map((t, idx) => (
                     <Grid key={t._id || t.id} item xs={12} sm={6} md={3}>
                         <TemplateCard
                             template={t}
@@ -452,6 +456,7 @@ const Templates = () => {
                             onToggleFavorite={handleToggleFavorite}
                             onUse={handleUse}
                             onDownload={handleDownload}
+                            tint={tintList[idx % tintList.length]}
                         />
                     </Grid>
                 ))}

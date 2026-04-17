@@ -70,7 +70,7 @@ const PRIVACY_INFO = {
     invite_only: { icon: <Lock fontSize="small" />, color: 'warning' },
 };
 
-const GroupCard = ({ group, onOpen, theme }) => {
+const GroupCard = ({ group, onOpen, theme, tint }) => {
     const privacy = PRIVACY_INFO[group.privacy] || PRIVACY_INFO.public;
     return (
         <Box
@@ -83,12 +83,12 @@ const GroupCard = ({ group, onOpen, theme }) => {
                 borderRadius: 3,
                 overflow: 'hidden',
                 border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-                background: theme.palette.background.paper,
-                boxShadow: theme.tokens?.shadow?.sm,
+                background: tint || theme.palette.background.paper,
+                boxShadow: theme.tokens?.shadow?.md,
                 transition: 'transform 0.15s ease, box-shadow 0.15s ease',
                 '&:hover': {
                     transform: 'translate(-2px, -2px)',
-                    boxShadow: theme.tokens?.shadow?.md,
+                    boxShadow: theme.tokens?.shadow?.lg,
                 },
             }}
         >
@@ -439,15 +439,20 @@ const Groups = () => {
                 ) : (
                     <>
                         <Grid container spacing={3}>
-                            {groups.map((g) => (
-                                <Grid item xs={12} sm={6} md={4} key={g._id}>
-                                    <GroupCard
-                                        group={g}
-                                        theme={theme}
-                                        onOpen={() => navigate(`/groups/${g.slug || g._id}`)}
-                                    />
-                                </Grid>
-                            ))}
+                            {groups.map((g, idx) => {
+                                const t = theme.palette.brand?.tints || {};
+                                const cycle = [t.mint, t.sky, t.lavender, t.peach, t.butter, t.rose];
+                                return (
+                                    <Grid item xs={12} sm={6} md={4} key={g._id}>
+                                        <GroupCard
+                                            group={g}
+                                            theme={theme}
+                                            tint={cycle[idx % cycle.length]}
+                                            onOpen={() => navigate(`/groups/${g.slug || g._id}`)}
+                                        />
+                                    </Grid>
+                                );
+                            })}
                         </Grid>
 
                         {tab === 0 && totalPages > 1 && (

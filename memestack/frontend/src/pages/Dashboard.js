@@ -88,28 +88,41 @@ const Dashboard = () => {
         ];
     }, [user, theme]);
 
+    const tints = theme.palette.brand?.tints || {};
     const quickActions = [
         {
             title: 'Create a meme',
             description: 'Blank canvas or a template — same fast editor.',
             icon: <AddIcon />,
-            tint: theme.palette.primary.main,
+            iconBg: theme.palette.primary.main,
+            surface: tints.lavender,
+            ink: tints.lavenderInk,
             action: () => navigate('/create'),
         },
         {
             title: 'Browse templates',
             description: 'Pick a template and go. Save favorites for later.',
             icon: <GalleryIcon />,
-            tint: theme.palette.secondary.main,
+            iconBg: theme.palette.secondary.main,
+            surface: tints.rose,
+            ink: tints.roseInk,
             action: () => navigate('/templates'),
         },
         {
             title: 'See your analytics',
             description: 'Likes, views, and shares — broken down by meme.',
             icon: <AnalyticsIcon />,
-            tint: theme.palette.brand?.accent || theme.palette.primary.main,
+            iconBg: theme.palette.brand?.accent || theme.palette.primary.main,
+            surface: tints.butter,
+            ink: tints.butterInk,
             action: () => navigate('/analytics'),
         },
+    ];
+
+    const discoverCards = [
+        { title: 'Active challenges', desc: 'Weekly themes, voting, leaderboards.',    to: '/challenges', surface: tints.peach, ink: tints.peachInk },
+        { title: 'Groups',            desc: 'Find a meme crew that fits your humor.',  to: '/groups',     surface: tints.mint,  ink: tints.mintInk },
+        { title: 'Following feed',    desc: 'Only memes from creators you follow.',    to: '/feed',       surface: tints.sky,   ink: tints.skyInk },
     ];
 
     const hasMemes = recentMemes.length > 0;
@@ -237,7 +250,7 @@ const Dashboard = () => {
                                         p: 3,
                                         borderRadius: 3,
                                         border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-                                        background: theme.palette.background.paper,
+                                        background: qa.surface || theme.palette.background.paper,
                                         boxShadow: theme.tokens?.shadow?.md,
                                         display: 'flex',
                                         flexDirection: 'column',
@@ -259,7 +272,7 @@ const Dashboard = () => {
                                             justifyContent: 'center',
                                             borderRadius: 2,
                                             border: `2px solid ${theme.palette.brand?.border}`,
-                                            background: qa.tint,
+                                            background: qa.iconBg,
                                             color: '#fff',
                                             boxShadow: theme.tokens?.shadow?.sm,
                                             '& svg': { fontSize: 26 },
@@ -267,7 +280,7 @@ const Dashboard = () => {
                                     >
                                         {qa.icon}
                                     </Box>
-                                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                                    <Typography variant="h6" sx={{ fontWeight: 800, color: qa.ink || 'inherit' }}>
                                         {qa.title}
                                     </Typography>
                                     <Typography sx={{ color: theme.palette.text.secondary }}>
@@ -275,10 +288,10 @@ const Dashboard = () => {
                                     </Typography>
                                     <Box sx={{ flex: 1 }} />
                                     <Stack direction="row" alignItems="center" spacing={0.5}>
-                                        <Typography sx={{ fontWeight: 700, color: theme.palette.primary.main }}>
+                                        <Typography sx={{ fontWeight: 700, color: qa.ink || theme.palette.primary.main }}>
                                             Open
                                         </Typography>
-                                        <ArrowIcon sx={{ fontSize: 18, color: theme.palette.primary.main }} />
+                                        <ArrowIcon sx={{ fontSize: 18, color: qa.ink || theme.palette.primary.main }} />
                                     </Stack>
                                 </Box>
                             </Grid>
@@ -294,11 +307,7 @@ const Dashboard = () => {
                     dense
                 >
                     <Grid container spacing={2}>
-                        {[
-                            { title: 'Active challenges', desc: 'Weekly themes, voting, leaderboards.', to: '/challenges' },
-                            { title: 'Groups',             desc: 'Find a meme crew that fits your humor.', to: '/groups' },
-                            { title: 'Following feed',     desc: 'Only memes from creators you follow.', to: '/feed' },
-                        ].map((d) => (
+                        {discoverCards.map((d) => (
                             <Grid key={d.title} item xs={12} sm={4}>
                                 <Box
                                     onClick={() => navigate(d.to)}
@@ -307,15 +316,19 @@ const Dashboard = () => {
                                         p: 2.5,
                                         borderRadius: 2,
                                         border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-                                        background: theme.palette.brand?.surfaceSubtle,
-                                        transition: 'transform 120ms ease, background 120ms ease',
+                                        background: d.surface || theme.palette.brand?.surfaceSubtle,
+                                        boxShadow: theme.tokens?.shadow?.sm,
+                                        transition: 'transform 120ms ease, box-shadow 120ms ease',
+                                        height: '100%',
                                         '&:hover': {
-                                            transform: 'translate(-1px, -1px)',
-                                            background: theme.palette.background.paper,
+                                            transform: 'translate(-2px, -2px)',
+                                            boxShadow: theme.tokens?.shadow?.md,
                                         },
                                     }}
                                 >
-                                    <Typography sx={{ fontWeight: 800, mb: 0.5 }}>{d.title}</Typography>
+                                    <Typography sx={{ fontWeight: 800, mb: 0.5, color: d.ink || 'inherit' }}>
+                                        {d.title}
+                                    </Typography>
                                     <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
                                         {d.desc}
                                     </Typography>

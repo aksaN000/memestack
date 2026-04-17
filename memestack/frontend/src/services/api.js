@@ -131,8 +131,21 @@ export const memeAPI = {
     shareMeme: (id) => unwrap(API.post(`/memes/${id}/share`)),
     downloadMeme: (id) => API.get(`/memes/${id}/download`, { responseType: 'blob' }),
     getMyMemes: (includePrivate = true) => unwrap(API.get('/memes/my-memes', { params: { includePrivate } })),
-    getUserMemes: (userId = null) =>
-        unwrap(API.get(userId ? `/memes/user/${userId}` : '/memes/my-memes')),
+    // Flexible signature:
+    //   getUserMemes()                         → own memes
+    //   getUserMemes('abc123')                 → memes of user abc123
+    //   getUserMemes({ limit: 6 })             → own memes with query params
+    //   getUserMemes('abc123', { limit: 6 })   → that user's memes with params
+    getUserMemes: (userIdOrParams = null, extraParams = {}) => {
+        const userId = typeof userIdOrParams === 'string' ? userIdOrParams : null;
+        const params = (userIdOrParams && typeof userIdOrParams === 'object')
+            ? userIdOrParams
+            : extraParams;
+        return unwrap(API.get(
+            userId ? `/memes/user/${userId}` : '/memes/my-memes',
+            { params },
+        ));
+    },
     getStats: () => unwrap(API.get('/memes/stats')),
 };
 

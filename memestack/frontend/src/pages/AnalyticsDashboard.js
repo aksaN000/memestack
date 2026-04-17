@@ -103,14 +103,19 @@ const AnalyticsDashboard = () => {
     const growth = analytics?.growth || {};
     const topMemes = analytics?.topMemes || [];
     const categoryStats = analytics?.categoryStats || [];
+    const tints = theme.palette.brand?.tints || {};
 
-    const surfaceSx = {
+    // Each insight panel gets a different tint so the page doesn't read as
+    // wall-to-wall white. Pass `tint`/`ink` per call.
+    const makeSurface = (tint, ink) => ({
         p: { xs: 2, md: 3 },
+        height: '100%',
         borderRadius: 3,
         border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-        background: theme.palette.background.paper,
-        boxShadow: theme.tokens?.shadow?.sm,
-    };
+        background: tint || theme.palette.background.paper,
+        boxShadow: theme.tokens?.shadow?.md,
+        '& .insight-title': { color: ink || 'inherit' },
+    });
 
     return (
         <Box>
@@ -222,10 +227,12 @@ const AnalyticsDashboard = () => {
 
                 <Grid container spacing={3}>
                     <Grid item xs={12} md={6}>
-                        <Box sx={surfaceSx}>
+                        <Box sx={makeSurface(tints.butter, tints.butterInk)}>
                             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
                                 <TrophyIcon sx={{ color: theme.palette.warning.main }} />
-                                <Typography sx={{ fontWeight: 900 }}>Top performing memes</Typography>
+                                <Typography className="insight-title" sx={{ fontWeight: 900 }}>
+                                    Top performing memes
+                                </Typography>
                             </Stack>
                             {topMemes.length === 0 ? (
                                 <EmptyState
@@ -314,8 +321,8 @@ const AnalyticsDashboard = () => {
                     </Grid>
 
                     <Grid item xs={12} md={6}>
-                        <Box sx={surfaceSx}>
-                            <Typography sx={{ fontWeight: 900, mb: 2 }}>
+                        <Box sx={makeSurface(tints.sky, tints.skyInk)}>
+                            <Typography className="insight-title" sx={{ fontWeight: 900, mb: 2 }}>
                                 Category performance
                             </Typography>
                             {categoryStats.length === 0 ? (

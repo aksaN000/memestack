@@ -98,15 +98,29 @@ const MemeCard = ({
                 },
             }}
         >
-            <Box sx={{ position: 'relative', backgroundColor: theme.palette.brand?.surfaceSubtle }}>
+            <Box
+                sx={{
+                    position: 'relative',
+                    width: '100%',
+                    // Fixed 1:1 box using padding-bottom — works reliably in
+                    // every browser and is stable *before* the image loads,
+                    // so feed cards don't jump around on first paint.
+                    pt: '100%',
+                    backgroundColor: theme.palette.brand?.surfaceSubtle,
+                    overflow: 'hidden',
+                }}
+            >
                 <CardMedia
                     component="img"
                     image={meme.imageUrl}
                     alt={meme.title || 'Meme'}
                     loading="lazy"
                     sx={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
                         width: '100%',
-                        aspectRatio: '1 / 1',
+                        height: '100%',
                         objectFit: 'cover',
                         display: 'block',
                     }}

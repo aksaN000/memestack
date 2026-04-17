@@ -266,26 +266,33 @@ const Home = () => {
         </Container>
     );
 
+    const tints = theme.palette.brand?.tints || {};
     const features = [
         {
             icon: <PaletteIcon />,
             title: 'A canvas built for memes',
             body: 'Upload or pick a template, add text layers, drag, resize, and export clean PNGs in seconds. No Photoshop needed.',
-            tint: theme.palette.primary.main,
+            iconBg: theme.palette.primary.main,
+            surface: tints.lavender,
+            ink: tints.lavenderInk,
             cta: { label: 'Try the editor', to: isAuthenticated ? '/create' : '/register' },
         },
         {
             icon: <ChallengeIcon />,
             title: 'Challenges keep it spicy',
             body: 'Join weekly themed challenges, submit entries, vote on favorites, climb the leaderboard.',
-            tint: theme.palette.secondary.main,
+            iconBg: theme.palette.secondary.main,
+            surface: tints.rose,
+            ink: tints.roseInk,
             cta: { label: 'See challenges', to: '/challenges' },
         },
         {
             icon: <HandshakeIcon />,
             title: 'Make memes with friends',
             body: 'Start a collaboration, invite others, remix in real-ish time. Groups let you build scenes together.',
-            tint: theme.palette.brand?.accent || theme.palette.primary.main,
+            iconBg: theme.palette.brand?.accent || theme.palette.primary.main,
+            surface: tints.mint,
+            ink: tints.mintInk,
             cta: { label: 'Browse collabs', to: '/collaborations' },
         },
     ];
@@ -306,7 +313,7 @@ const Home = () => {
                                     p: 3.5,
                                     borderRadius: 3,
                                     border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-                                    backgroundColor: theme.palette.background.paper,
+                                    backgroundColor: f.surface || theme.palette.background.paper,
                                     boxShadow: theme.tokens?.shadow?.md,
                                     display: 'flex',
                                     flexDirection: 'column',
@@ -327,7 +334,7 @@ const Home = () => {
                                         justifyContent: 'center',
                                         borderRadius: 2,
                                         border: `2px solid ${theme.palette.brand?.border}`,
-                                        background: f.tint,
+                                        background: f.iconBg,
                                         color: '#fff',
                                         '& svg': { fontSize: 28 },
                                         boxShadow: theme.tokens?.shadow?.sm,
@@ -335,7 +342,7 @@ const Home = () => {
                                 >
                                     {f.icon}
                                 </Box>
-                                <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+                                <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em', color: f.ink || 'inherit' }}>
                                     {f.title}
                                 </Typography>
                                 <Typography sx={{ color: theme.palette.text.secondary, lineHeight: 1.6 }}>
@@ -345,7 +352,7 @@ const Home = () => {
                                 <Button
                                     onClick={() => navigate(f.cta.to)}
                                     endIcon={<ArrowIcon />}
-                                    sx={{ alignSelf: 'flex-start', fontWeight: 700, mt: 1 }}
+                                    sx={{ alignSelf: 'flex-start', fontWeight: 700, mt: 1, color: f.ink || theme.palette.primary.main }}
                                 >
                                     {f.cta.label}
                                 </Button>

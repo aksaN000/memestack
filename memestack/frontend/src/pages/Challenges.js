@@ -80,7 +80,7 @@ const formatTimeRemaining = (endDate) => {
     return `${hours}h`;
 };
 
-const ChallengeCard = ({ challenge, onOpen, theme }) => (
+const ChallengeCard = ({ challenge, onOpen, theme, tint }) => (
     <Box
         onClick={onOpen}
         sx={{
@@ -91,12 +91,12 @@ const ChallengeCard = ({ challenge, onOpen, theme }) => (
             borderRadius: 3,
             overflow: 'hidden',
             border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
-            background: theme.palette.background.paper,
-            boxShadow: theme.tokens?.shadow?.sm,
+            background: tint || theme.palette.background.paper,
+            boxShadow: theme.tokens?.shadow?.md,
             transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             '&:hover': {
                 transform: 'translate(-2px, -2px)',
-                boxShadow: theme.tokens?.shadow?.md,
+                boxShadow: theme.tokens?.shadow?.lg,
             },
         }}
     >
@@ -402,15 +402,20 @@ const Challenges = () => {
                 ) : (
                     <>
                         <Grid container spacing={3}>
-                            {challenges.map((c) => (
-                                <Grid item xs={12} sm={6} md={4} key={c._id}>
-                                    <ChallengeCard
-                                        challenge={c}
-                                        theme={theme}
-                                        onOpen={() => navigate(`/challenges/${c._id}`)}
-                                    />
-                                </Grid>
-                            ))}
+                            {challenges.map((c, idx) => {
+                                const t = theme.palette.brand?.tints || {};
+                                const cycle = [t.lavender, t.peach, t.mint, t.sky, t.rose, t.butter];
+                                return (
+                                    <Grid item xs={12} sm={6} md={4} key={c._id}>
+                                        <ChallengeCard
+                                            challenge={c}
+                                            theme={theme}
+                                            tint={cycle[idx % cycle.length]}
+                                            onOpen={() => navigate(`/challenges/${c._id}`)}
+                                        />
+                                    </Grid>
+                                );
+                            })}
                         </Grid>
 
                         {tab === 0 && totalPages > 1 && (
