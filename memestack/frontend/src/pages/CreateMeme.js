@@ -279,6 +279,14 @@ const CreateMeme = () => {
         }
     };
 
+    // ---- render ------------------------------------------------------------
+    const hasSource = !!previewUrl;
+    const sourceLabel = useMemo(() => {
+        if (selectedTemplate) return `Template: ${selectedTemplate.title || 'Untitled'}`;
+        if (imageFile) return imageFile.name;
+        return '';
+    }, [selectedTemplate, imageFile]);
+
     // ---- editor takeover ---------------------------------------------------
     if (showEditor && uploadedUrl) {
         return (
@@ -289,14 +297,6 @@ const CreateMeme = () => {
             />
         );
     }
-
-    // ---- render ------------------------------------------------------------
-    const hasSource = !!previewUrl;
-    const sourceLabel = useMemo(() => {
-        if (selectedTemplate) return `Template: ${selectedTemplate.title || 'Untitled'}`;
-        if (imageFile) return imageFile.name;
-        return '';
-    }, [selectedTemplate, imageFile]);
 
     return (
         <Box>
