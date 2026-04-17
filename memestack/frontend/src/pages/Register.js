@@ -1,41 +1,59 @@
-// 📝 Register Page Component
-// User registration form
+// ============================================================================
+// Register — create a new account.
+// ----------------------------------------------------------------------------
+// Mirrors the Login layout on desktop. Validates username/email/password
+// client-side before posting so users don't spend API calls on typos.
+// ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    Container,
-    Paper,
-    TextField,
-    Button,
-    Typography,
     Box,
-    Link,
+    Button,
+    Container,
+    TextField,
+    Typography,
     Alert,
     InputAdornment,
     IconButton,
+    Stack,
+    Grid,
+    Link as MuiLink,
     CircularProgress,
-    Fade,
-    Zoom,
-    useTheme,
+    LinearProgress,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Visibility,
     VisibilityOff,
     Email as EmailIcon,
     Lock as LockIcon,
     Person as PersonIcon,
+    CheckCircleOutline,
 } from '@mui/icons-material';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
+
+// --- password strength -------------------------------------------------------
+// Very simple heuristic — matches the backend's minimum of 6 characters, then
+// gives the user a nudge to go longer + add variety.
+const scorePassword = (pw) => {
+    if (!pw) return { score: 0, label: '' };
+    let score = 0;
+    if (pw.length >= 6) score += 1;
+    if (pw.length >= 10) score += 1;
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score += 1;
+    if (/\d/.test(pw)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pw)) score += 1;
+    const label = ['Too short', 'Weak', 'Okay', 'Good', 'Strong', 'Very strong'][score];
+    return { score, label };
+};
 
 const Register = () => {
+    const theme = useTheme();
     const navigate = useNavigate();
     const { register, isAuthenticated, isLoading, error, clearError } = useAuth();
-    const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode();
 
-    // Form state
     const [formData, setFormData] = useState({
         username: '',
         email: '',
@@ -43,577 +61,318 @@ const Register = () => {
         confirmPassword: '',
     });
     const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [validationErrors, setValidationErrors] = useState({});
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [validation, setValidation] = useState({});
 
-    // Redirect if already authenticated
     useEffect(() => {
-        if (isAuthenticated) {
-            navigate('/dashboard', { replace: true });
-        }
+        if (isAuthenticated) navigate('/dashboard', { replace: true });
     }, [isAuthenticated, navigate]);
 
-    // Clear errors when component mounts (force initial clear)
     useEffect(() => {
         clearError();
-    }, []); // Empty dependency array for initial mount
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    // Clear errors when component mounts
-    useEffect(() => {
-        clearError();
-    }, [clearError]);
-
-    // Handle input changes
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-
-        // Clear validation error for this field
-        if (validationErrors[name]) {
-            setValidationErrors(prev => ({
-                ...prev,
-                [name]: ''
-            }));
-        }
+        setFormData((prev) => ({ ...prev, [name]: value }));
+        if (validation[name]) setValidation((prev) => ({ ...prev, [name]: '' }));
     };
 
-    // Toggle password visibility
-    const handleTogglePassword = () => {
-        setShowPassword(!showPassword);
-    };
+    const pwStrength = useMemo(() => scorePassword(formData.password), [formData.password]);
 
-    const handleToggleConfirmPassword = () => {
-        setShowConfirmPassword(!showConfirmPassword);
-    };
-
-    // Validate form
-    const validateForm = () => {
+    const validate = () => {
         const errors = {};
+        if (!formData.username) errors.username = 'Pick a username';
+        else if (formData.username.length < 3) errors.username = 'At least 3 characters';
+        else if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) errors.username = 'Letters, numbers, and underscores only';
 
-        // Username validation
-        if (!formData.username) {
-            errors.username = 'Username is required';
-        } else if (formData.username.length < 3) {
-            errors.username = 'Username must be at least 3 characters';
-        } else if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
-            errors.username = 'Username can only contain letters, numbers, and underscores';
-        }
+        if (!formData.email) errors.email = 'Enter your email';
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) errors.email = 'That doesn\'t look like a valid email';
 
-        // Email validation
-        if (!formData.email) {
-            errors.email = 'Email is required';
-        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-            errors.email = 'Please enter a valid email address';
-        }
+        if (!formData.password) errors.password = 'Create a password';
+        else if (formData.password.length < 6) errors.password = 'At least 6 characters';
 
-        // Password validation
-        if (!formData.password) {
-            errors.password = 'Password is required';
-        } else if (formData.password.length < 6) {
-            errors.password = 'Password must be at least 6 characters';
-        }
+        if (!formData.confirmPassword) errors.confirmPassword = 'Confirm your password';
+        else if (formData.password !== formData.confirmPassword)
+            errors.confirmPassword = 'Passwords don\'t match';
 
-        // Confirm password validation
-        if (!formData.confirmPassword) {
-            errors.confirmPassword = 'Please confirm your password';
-        } else if (formData.password !== formData.confirmPassword) {
-            errors.confirmPassword = 'Passwords do not match';
-        }
-
-        setValidationErrors(errors);
+        setValidation(errors);
         return Object.keys(errors).length === 0;
     };
 
-    // Handle form submission
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
-        if (!validateForm()) {
-            return;
-        }
-
-        const { confirmPassword, ...userData } = formData;
-        const result = await register(userData);
-        
-        if (result.success) {
-            navigate('/dashboard', { replace: true });
-        }
+        if (!validate()) return;
+        const { confirmPassword, ...payload } = formData;
+        const result = await register(payload);
+        if (result?.success) navigate('/dashboard', { replace: true });
     };
 
+    const strengthColor = ['#CBD5E1', '#EF4444', '#F59E0B', '#F59E0B', '#16A34A', '#16A34A'][pwStrength.score];
+
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            py: 4,
-        }}>
-            <Container maxWidth="sm">
-                <Fade in={true} timeout={1000}>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            p: 6,
-                            background: mode === 'dark'
-                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                            backdropFilter: 'blur(50px)',
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.15)'
-                                : '2px solid rgba(99, 102, 241, 0.15)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.25)'
-                                : '3px solid rgba(99, 102, 241, 0.25)',
-                            borderRadius: '24px',
-                            position: 'relative',
-                            overflow: 'hidden',
-                            boxShadow: mode === 'dark'
-                                ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                            '&::before': {
-                                content: '""',
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                height: '4px',
-                                background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                            },
-                        }}
-                    >
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Box sx={{ textAlign: 'center', mb: 4 }}>
-                                <Typography 
-                                    variant="h3" 
-                                    component="h1" 
-                                    sx={{
-                                        fontWeight: 800,
-                                        mb: 2,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 1.5,
-                                    }}
-                                >
-                                    {/* Theater Masks Emoji - Separate for Natural Colors */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            fontSize: 'inherit',
-                                            filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                            '&:hover': {
-                                                transform: 'scale(1.1) rotate(5deg)',
-                                                transition: 'transform 0.3s ease',
-                                            },
-                                        }}
-                                    >
-                                        🎭
-                                    </Box>
-                                    
-                                    {/* Join MemeStack Text with Gradient */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                            backgroundClip: 'text',
-                                            WebkitBackgroundClip: 'text',
-                                            color: 'transparent',
-                                            // Fallback for browsers that don't support background-clip
-                                            '@supports not (-webkit-background-clip: text)': {
-                                                background: 'none',
-                                                color: currentThemeColors?.primary || '#6366f1',
-                                            },
-                                        }}
-                                    >
-                                        Join MemeStack
-                                    </Box>
-                                </Typography>
-                                
-                                <Typography 
-                                    variant="h6" 
-                                    sx={{ 
-                                        color: theme.palette.text.secondary,
-                                        fontWeight: 500,
-                                        lineHeight: 1.6,
-                                    }}
-                                >
-                                    Create your account and start sharing your creativity with the world.
-                                </Typography>
-                            </Box>
-                        </Zoom>
-
-                        {/* Error Alert */}
-                        {error && (
-                            <Fade in={true} timeout={800}>
-                                <Alert 
-                                    severity="error" 
-                                    sx={{ 
-                                        width: '100%', 
-                                        mb: 3,
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(244, 67, 54, 0.1)'
-                                            : 'rgba(244, 67, 54, 0.05)',
-                                        backdropFilter: 'blur(10px)',
-                                        border: '1px solid rgba(244, 67, 54, 0.2)',
-                                    }}
-                                    onClose={clearError}
-                                >
-                                    {error}
-                                </Alert>
-                            </Fade>
-                        )}
-
-                        {/* Enhanced Register Form */}
-                        <Box 
-                            component="form" 
+        <Box
+            sx={{
+                minHeight: 'calc(100vh - 72px)',
+                background: theme.palette.brand?.bgAlt || theme.palette.background.default,
+                py: { xs: 6, md: 10 },
+            }}
+        >
+            <Container maxWidth="lg">
+                <Grid container spacing={6} alignItems="center">
+                    {/* Form */}
+                    <Grid item xs={12} md={7}>
+                        <Box
+                            component="form"
                             onSubmit={handleSubmit}
-                            sx={{ width: '100%' }}
+                            sx={{
+                                p: { xs: 3, sm: 5 },
+                                borderRadius: 4,
+                                border: `2px solid ${theme.palette.brand?.border}`,
+                                background: theme.palette.background.paper,
+                                boxShadow: theme.tokens?.shadow?.lg,
+                                maxWidth: 560,
+                                mx: { xs: 'auto', md: 0 },
+                            }}
                         >
-                            {/* Username Field */}
-                            <TextField
-                                fullWidth
-                                id="username"
-                                name="username"
-                                label="Username"
-                                value={formData.username}
-                                onChange={handleChange}
-                                error={!!validationErrors.username}
-                                helperText={validationErrors.username}
-                                margin="normal"
-                                autoComplete="username"
-                                autoFocus
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
-                                InputProps={{
-                                    startAdornment: (
-                                        <InputAdornment position="start">
-                                            <PersonIcon sx={{ color: theme.palette.primary.main }} />
-                                        </InputAdornment>
-                                    ),
-                                }}
-                            />
+                            <Typography variant="h4" sx={{ fontWeight: 900, mb: 0.5 }}>
+                                Create your account
+                            </Typography>
+                            <Typography sx={{ color: theme.palette.text.secondary, mb: 3 }}>
+                                Already have one?{' '}
+                                <MuiLink
+                                    component={RouterLink}
+                                    to="/login"
+                                    sx={{ fontWeight: 700, color: theme.palette.primary.main }}
+                                >
+                                    Log in
+                                </MuiLink>
+                            </Typography>
 
-                            {/* Email Field */}
-                            <TextField
-                                fullWidth
-                                id="email"
-                                name="email"
-                                label="Email Address"
-                                type="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                error={!!validationErrors.email}
-                                helperText={validationErrors.email}
-                                margin="normal"
-                                autoComplete="email"
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
-                                InputProps={{
-                                    startAdornment: (
-                                        <InputAdornment position="start">
-                                            <EmailIcon sx={{ color: theme.palette.primary.main }} />
-                                        </InputAdornment>
-                                    ),
-                                }}
-                            />
+                            {error && (
+                                <Alert severity="error" onClose={clearError} sx={{ mb: 2.5 }}>
+                                    {typeof error === 'string' ? error : 'Registration failed. Try again.'}
+                                </Alert>
+                            )}
 
-                            {/* Password Field */}
-                            <TextField
-                                fullWidth
-                                id="password"
-                                name="password"
-                                label="Password"
-                                type={showPassword ? 'text' : 'password'}
-                                value={formData.password}
-                                onChange={handleChange}
-                                error={!!validationErrors.password}
-                                helperText={validationErrors.password}
-                                margin="normal"
-                                autoComplete="new-password"
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
-                                InputProps={{
-                                    startAdornment: (
-                                        <InputAdornment position="start">
-                                            <LockIcon sx={{ color: theme.palette.primary.main }} />
-                                        </InputAdornment>
-                                    ),
-                                    endAdornment: (
-                                        <InputAdornment position="end">
-                                            <IconButton
-                                                aria-label="toggle password visibility"
-                                                onClick={handleTogglePassword}
-                                                edge="end"
-                                                sx={{
-                                                    color: theme.palette.primary.main,
-                                                    '&:hover': {
-                                                        background: 'rgba(99, 102, 241, 0.1)',
-                                                    },
-                                                }}
-                                            >
-                                                {showPassword ? <VisibilityOff /> : <Visibility />}
-                                            </IconButton>
-                                        </InputAdornment>
-                                    ),
-                                }}
-                            />
+                            <Grid container spacing={2}>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        name="username"
+                                        label="Username"
+                                        autoComplete="username"
+                                        value={formData.username}
+                                        onChange={handleChange}
+                                        error={!!validation.username}
+                                        helperText={validation.username || 'Letters, numbers, or underscores'}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <PersonIcon sx={{ color: theme.palette.text.secondary }} />
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                    />
+                                </Grid>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        name="email"
+                                        label="Email"
+                                        type="email"
+                                        autoComplete="email"
+                                        value={formData.email}
+                                        onChange={handleChange}
+                                        error={!!validation.email}
+                                        helperText={validation.email}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <EmailIcon sx={{ color: theme.palette.text.secondary }} />
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                    />
+                                </Grid>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        name="password"
+                                        label="Password"
+                                        type={showPassword ? 'text' : 'password'}
+                                        autoComplete="new-password"
+                                        value={formData.password}
+                                        onChange={handleChange}
+                                        error={!!validation.password}
+                                        helperText={validation.password}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <LockIcon sx={{ color: theme.palette.text.secondary }} />
+                                                </InputAdornment>
+                                            ),
+                                            endAdornment: (
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        aria-label="toggle password visibility"
+                                                        onClick={() => setShowPassword((s) => !s)}
+                                                        edge="end"
+                                                    >
+                                                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                    />
+                                </Grid>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        name="confirmPassword"
+                                        label="Confirm password"
+                                        type={showConfirm ? 'text' : 'password'}
+                                        autoComplete="new-password"
+                                        value={formData.confirmPassword}
+                                        onChange={handleChange}
+                                        error={!!validation.confirmPassword}
+                                        helperText={validation.confirmPassword}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <LockIcon sx={{ color: theme.palette.text.secondary }} />
+                                                </InputAdornment>
+                                            ),
+                                            endAdornment: (
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        aria-label="toggle confirm visibility"
+                                                        onClick={() => setShowConfirm((s) => !s)}
+                                                        edge="end"
+                                                    >
+                                                        {showConfirm ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                    />
+                                </Grid>
+                            </Grid>
 
-                            {/* Confirm Password Field */}
-                            <TextField
-                                fullWidth
-                                id="confirmPassword"
-                                name="confirmPassword"
-                                label="Confirm Password"
-                                type={showConfirmPassword ? 'text' : 'password'}
-                                value={formData.confirmPassword}
-                                onChange={handleChange}
-                                error={!!validationErrors.confirmPassword}
-                                helperText={validationErrors.confirmPassword}
-                                margin="normal"
-                                autoComplete="new-password"
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
-                                InputProps={{
-                                    startAdornment: (
-                                        <InputAdornment position="start">
-                                            <LockIcon sx={{ color: theme.palette.primary.main }} />
-                                        </InputAdornment>
-                                    ),
-                                    endAdornment: (
-                                        <InputAdornment position="end">
-                                            <IconButton
-                                                aria-label="toggle confirm password visibility"
-                                                onClick={handleToggleConfirmPassword}
-                                                edge="end"
-                                                sx={{
-                                                    color: theme.palette.primary.main,
-                                                    '&:hover': {
-                                                        background: 'rgba(99, 102, 241, 0.1)',
-                                                    },
-                                                }}
-                                            >
-                                                {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
-                                            </IconButton>
-                                        </InputAdornment>
-                                    ),
-                                }}
-                            />
+                            {formData.password && (
+                                <Box sx={{ mt: 1.5 }}>
+                                    <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.75 }}>
+                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>
+                                            Password strength
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ fontWeight: 700, color: strengthColor }}>
+                                            {pwStrength.label}
+                                        </Typography>
+                                    </Stack>
+                                    <LinearProgress
+                                        variant="determinate"
+                                        value={(pwStrength.score / 5) * 100}
+                                        sx={{
+                                            '& .MuiLinearProgress-bar': {
+                                                background: strengthColor,
+                                            },
+                                        }}
+                                    />
+                                </Box>
+                            )}
 
-                            {/* Enhanced Submit Button */}
                             <Button
                                 type="submit"
                                 fullWidth
-                                variant="contained"
                                 size="large"
+                                variant="contained"
                                 disabled={isLoading}
-                                sx={{ 
-                                    mt: 4, 
-                                    mb: 3,
-                                    py: 2,
-                                    fontWeight: 600,
-                                    fontSize: '1.1rem',
-                                    borderRadius: '12px',
-                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                    textTransform: 'none',
-                                    boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                    '&:hover': {
-                                        background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#5b5bf6'}, ${currentThemeColors?.secondary || '#7c3aed'})`,
-                                        boxShadow: `0 12px 40px ${currentThemeColors?.primary || '#6366f1'}60`,
-                                        transform: 'translateY(-2px)',
-                                    },
-                                    '&:disabled': {
-                                        background: `${currentThemeColors?.primary || '#6366f1'}80`,
-                                        color: 'white',
-                                    },
-                                }}
+                                sx={{ mt: 3, py: 1.5, fontSize: '1rem', fontWeight: 800 }}
                             >
-                                {isLoading ? (
-                                    <CircularProgress size={24} color="inherit" />
-                                ) : (
-                                    'Create Account'
-                                )}
+                                {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Create account'}
                             </Button>
 
-                            {/* Enhanced Links */}
-                            <Box sx={{ textAlign: 'center' }}>
-                                <Paper
-                                    elevation={0}
-                                    sx={{
-                                        p: 2,
-                                        background: mode === 'dark'
-                                            ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                            : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.75) 100%)',
-                                        backdropFilter: 'blur(40px)',
-                                        border: mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.12)'
-                                            : '2px solid rgba(99, 102, 241, 0.12)',
-                                        borderTop: mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.2)'
-                                            : '3px solid rgba(99, 102, 241, 0.2)',
-                                        borderRadius: '12px',
-                                        boxShadow: mode === 'dark'
-                                            ? '0 8px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                            : '0 8px 30px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                    }}
-                                >
-                                    <Typography 
-                                        variant="body2" 
-                                        sx={{ color: theme.palette.text.secondary }}
-                                    >
-                                        Already have an account?{' '}
-                                        <Link
-                                            component={RouterLink}
-                                            to="/login"
-                                            sx={{ 
-                                                fontWeight: 600,
-                                                color: theme.palette.primary.main,
-                                                textDecoration: 'none',
-                                                '&:hover': { 
-                                                    textDecoration: 'underline',
-                                                    color: theme.palette.primary.dark,
-                                                }
-                                            }}
-                                        >
-                                            Sign in here
-                                        </Link>
-                                    </Typography>
-                                </Paper>
-                            </Box>
-                        </Box>
-                    </Paper>
-                </Fade>
-
-                {/* Enhanced Terms */}
-                <Fade in={true} timeout={1500}>
-                    <Box sx={{ mt: 4, textAlign: 'center' }}>
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                p: 3,
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.75) 100%)',
-                                backdropFilter: 'blur(40px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.12)'
-                                    : '2px solid rgba(99, 102, 241, 0.12)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.2)'
-                                    : '3px solid rgba(99, 102, 241, 0.2)',
-                                borderRadius: '16px',
-                                boxShadow: mode === 'dark'
-                                    ? '0 8px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                    : '0 8px 30px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                            }}
-                        >
-                            <Typography 
-                                variant="body2" 
-                                sx={{ 
+                            <Typography
+                                variant="caption"
+                                sx={{
+                                    display: 'block',
+                                    textAlign: 'center',
+                                    mt: 2,
                                     color: theme.palette.text.secondary,
-                                    fontWeight: 500,
                                 }}
                             >
-                                By creating an account, you agree to our{' '}
-                                <Link 
-                                    href="/terms" 
-                                    sx={{ 
-                                        color: theme.palette.primary.main,
-                                        textDecoration: 'none',
-                                        '&:hover': { textDecoration: 'underline' }
-                                    }}
-                                >
-                                    Terms of Service
-                                </Link>
+                                By creating an account you agree to our{' '}
+                                <MuiLink component={RouterLink} to="/terms" sx={{ fontWeight: 600 }}>
+                                    Terms
+                                </MuiLink>
                                 {' '}and{' '}
-                                <Link 
-                                    href="/privacy" 
-                                    sx={{ 
-                                        color: theme.palette.primary.main,
-                                        textDecoration: 'none',
-                                        '&:hover': { textDecoration: 'underline' }
-                                    }}
-                                >
+                                <MuiLink component={RouterLink} to="/privacy" sx={{ fontWeight: 600 }}>
                                     Privacy Policy
-                                </Link>
+                                </MuiLink>
                                 .
                             </Typography>
-                        </Paper>
-                    </Box>
-                </Fade>
+                        </Box>
+                    </Grid>
+
+                    {/* Marketing side */}
+                    <Grid item xs={12} md={5} sx={{ display: { xs: 'none', md: 'block' } }}>
+                        <Box
+                            sx={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 64,
+                                height: 64,
+                                borderRadius: 2,
+                                border: `2px solid ${theme.palette.brand?.border}`,
+                                background: theme.palette.brand?.gradient,
+                                boxShadow: theme.tokens?.shadow?.md,
+                                fontSize: 36,
+                                color: '#fff',
+                                mb: 3,
+                            }}
+                        >
+                            ⚡
+                        </Box>
+                        <Typography
+                            variant="h2"
+                            sx={{
+                                fontWeight: 900,
+                                letterSpacing: '-0.03em',
+                                mb: 2,
+                                fontSize: { md: '2.75rem' },
+                            }}
+                        >
+                            Join the stack.
+                        </Typography>
+                        <Typography
+                            sx={{
+                                color: theme.palette.text.secondary,
+                                fontSize: '1.125rem',
+                                lineHeight: 1.6,
+                                maxWidth: 440,
+                                mb: 4,
+                            }}
+                        >
+                            Free, forever for your first stack of memes. No credit card.
+                            No fake premium tiers. Just an account.
+                        </Typography>
+                        <Stack spacing={1.5}>
+                            {[
+                                'Unlimited public memes',
+                                'Weekly challenges + leaderboards',
+                                'Folders, groups, and collaborations',
+                                'Follow creators whose style you love',
+                            ].map((line) => (
+                                <Stack key={line} direction="row" spacing={1.5} alignItems="center">
+                                    <CheckCircleOutline sx={{ color: theme.palette.primary.main }} />
+                                    <Typography sx={{ fontWeight: 600 }}>{line}</Typography>
+                                </Stack>
+                            ))}
+                        </Stack>
+                    </Grid>
+                </Grid>
             </Container>
         </Box>
     );

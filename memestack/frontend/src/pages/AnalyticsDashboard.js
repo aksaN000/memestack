@@ -1,451 +1,384 @@
-// 📊 Analytics Dashboard Page Component
-// Comprehensive analytics and insights for users
+// ============================================================================
+// AnalyticsDashboard — personal performance metrics for a signed-in creator.
+// ----------------------------------------------------------------------------
+// PageHeader with time-range picker, grid of StatCards, and two insight panels:
+// top performing memes + category breakdown with progress bars.
+// ============================================================================
 
 import React, { useEffect, useState } from 'react';
 import {
-    Container,
-    Typography,
-    Box,
-    Grid,
-    Card,
-    CardContent,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    Chip,
-    Avatar,
-    LinearProgress,
-    Divider,
-    List,
-    ListItem,
-    ListItemAvatar,
-    ListItemText,
     Alert,
-    useTheme,
-    Paper,
-    Fade,
-    Zoom,
+    Avatar,
+    Box,
+    Chip,
+    Container,
+    FormControl,
+    Grid,
+    InputLabel,
+    LinearProgress,
+    MenuItem,
+    Select,
+    Stack,
+    Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
-    TrendingUp as TrendingUpIcon,
-    TrendingDown as TrendingDownIcon,
-    Visibility as ViewsIcon,
-    Favorite as LikesIcon,
-    Share as SharesIcon,
-    Download as DownloadsIcon,
-    Comment as CommentsIcon,
-    People as FollowersIcon,
-    PersonAdd as FollowingIcon,
-    EmojiEvents as TrophyIcon,
     Assessment as AnalyticsIcon,
+    Comment as CommentsIcon,
+    Download as DownloadsIcon,
+    EmojiEvents as TrophyIcon,
+    Favorite as LikesIcon,
+    People as FollowersIcon,
+    Share as SharesIcon,
+    TrendingUp as TrendingUpIcon,
+    Visibility as ViewsIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
 import { analyticsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
-import LoadingSpinner from '../components/common/LoadingSpinner';
-import StatCard from '../components/common/StatCard';
+import {
+    EmptyState,
+    ErrorState,
+    LoadingSpinner,
+    PageHeader,
+    StatCard,
+} from '../components/common';
 
 const AnalyticsDashboard = () => {
     const navigate = useNavigate();
-    const { user } = useAuth();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode() || { mode: 'light' };
+    const { user } = useAuth();
+
     const [analytics, setAnalytics] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [timeRange, setTimeRange] = useState(30);
     const [error, setError] = useState(null);
-
-    // Fetch analytics data
-    const fetchAnalytics = async (range = timeRange) => {
-        try {
-            setLoading(true);
-            setError(null);
-            const response = await analyticsAPI.getDashboard(range);
-            setAnalytics(response.data);
-        } catch (error) {
-            console.error('Error fetching analytics:', error);
-            setError(error.message || 'Failed to load analytics');
-        } finally {
-            setLoading(false);
-        }
-    };
+    const [timeRange, setTimeRange] = useState(30);
 
     useEffect(() => {
-        if (user) {
-            fetchAnalytics();
-        }
-    }, [user]);
-
-    // Handle time range change
-    const handleTimeRangeChange = (event) => {
-        const newRange = event.target.value;
-        setTimeRange(newRange);
-        fetchAnalytics(newRange);
-    };
-
-    // Format numbers for display
-    const formatNumber = (num) => {
-        if (num >= 1000000) {
-            return (num / 1000000).toFixed(1) + 'M';
-        } else if (num >= 1000) {
-            return (num / 1000).toFixed(1) + 'K';
-        }
-        return num?.toString() || '0';
-    };
-
-    // Format percentage
-    const formatPercentage = (num) => {
-        if (isNaN(num)) return '0%';
-        return `${num > 0 ? '+' : ''}${num.toFixed(1)}%`;
-    };
+        if (!user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                setLoading(true);
+                setError(null);
+                const response = await analyticsAPI.getDashboard(timeRange);
+                if (cancelled) return;
+                setAnalytics(response.data);
+            } catch (e) {
+                if (!cancelled) setError(e.message || 'Failed to load analytics');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [user, timeRange]);
 
     if (!user) {
         return (
-            <Container maxWidth="lg" sx={{ py: 4 }}>
-                <Alert severity="info">
-                    Please log in to view your analytics dashboard.
-                </Alert>
+            <Container maxWidth="md" sx={{ py: 4 }}>
+                <Alert severity="info">Log in to view your analytics dashboard.</Alert>
             </Container>
         );
     }
 
     if (loading) {
-        return <LoadingSpinner message="Loading your analytics..." fullScreen />;
+        return <LoadingSpinner message="Crunching the numbers…" fullScreen />;
     }
 
     if (error) {
         return (
-            <Container maxWidth="lg" sx={{ py: 4 }}>
-                <Alert severity="error">
-                    {error}
-                </Alert>
+            <Container maxWidth="md" sx={{ py: 4 }}>
+                <ErrorState
+                    title="Couldn't load analytics"
+                    description={error}
+                />
             </Container>
         );
     }
 
-    const { overview, growth, topMemes, categoryStats } = analytics;
+    const overview = analytics?.overview || {};
+    const growth = analytics?.growth || {};
+    const topMemes = analytics?.topMemes || [];
+    const categoryStats = analytics?.categoryStats || [];
+
+    const surfaceSx = {
+        p: { xs: 2, md: 3 },
+        borderRadius: 3,
+        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+        background: theme.palette.background.paper,
+        boxShadow: theme.tokens?.shadow?.sm,
+    };
 
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="lg">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: mode === 'dark'
-                                        ? 'rgba(255, 255, 255, 0.05)'
-                                        : 'rgba(255, 255, 255, 0.9)',
-                                    backdropFilter: 'blur(20px)',
-                                    border: mode === 'dark'
-                                        ? '1px solid rgba(255, 255, 255, 0.1)'
-                                        : '1px solid rgba(99, 102, 241, 0.1)',
-                                    borderRadius: '24px',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    '&::before': {
-                                        content: '""',
-                                        position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: '4px',
-                                        background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.primary || '#ec4899'} 100%)`,
-                                    },
-                                }}
-                            >
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography 
-                                        variant="h3" 
-                                        component="h1" 
-                                        sx={{
-                                            fontWeight: 800,
-                                            mb: 2,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 1.5
-                                        }}
-                                    >
-                                        {/* Chart Emoji - Separate for Natural Colors */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                fontSize: 'inherit',
-                                                filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                                '&:hover': {
-                                                    transform: 'scale(1.1) rotate(2deg)',
-                                                    transition: 'transform 0.3s ease',
-                                                },
-                                            }}
-                                        >
-                                            📊
-                                        </Box>
-                                        
-                                        {/* Analytics Dashboard Text with Gradient */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#ec4899'} 100%)`,
-                                                backgroundClip: 'text',
-                                                WebkitBackgroundClip: 'text',
-                                                color: 'transparent',
-                                                // Fallback for browsers that don't support background-clip
-                                                '@supports not (-webkit-background-clip: text)': {
-                                                    background: 'none',
-                                                    color: currentThemeColors?.primary || '#6366f1',
-                                                },
-                                            }}
-                                        >
-                                            Analytics Dashboard
-                                        </Box>
-                                    </Typography>
-                                    <Typography 
-                                        variant="h6" 
-                                        sx={{ 
-                                            color: theme.palette.text.secondary,
-                                            fontWeight: 500,
-                                        }}
-                                    >
-                                        Track your meme performance and audience insights
-                                    </Typography>
-                                </Box>
-                            </Paper>
-                        </Zoom>
-
-                        {/* Main Content Card */}
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark'
-                                    ? 'rgba(255, 255, 255, 0.05)'
-                                    : 'rgba(255, 255, 255, 0.9)',
-                                backdropFilter: 'blur(20px)',
-                                border: mode === 'dark'
-                                    ? '1px solid rgba(255, 255, 255, 0.1)'
-                                    : '1px solid rgba(99, 102, 241, 0.1)',
-                                borderRadius: '20px',
-                                p: 4,
-                            }}
+        <Box>
+            <PageHeader
+                eyebrow="ANALYTICS"
+                title="Your performance at a glance"
+                subtitle="Track reach, reactions, and audience growth over time."
+                icon={<AnalyticsIcon />}
+                actions={
+                    <FormControl
+                        size="small"
+                        sx={{ minWidth: 180, background: theme.palette.background.paper, borderRadius: 2 }}
+                    >
+                        <InputLabel>Time range</InputLabel>
+                        <Select
+                            value={timeRange}
+                            label="Time range"
+                            onChange={(e) => setTimeRange(e.target.value)}
                         >
-                        {/* Header */}
-                        <Zoom in timeout={600}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-                                <FormControl size="small" sx={{ minWidth: 120 }}>
-                                    <InputLabel>Time Range</InputLabel>
-                                    <Select value={timeRange} onChange={handleTimeRangeChange} label="Time Range">
-                                        <MenuItem value={7}>Last 7 days</MenuItem>
-                                        <MenuItem value={30}>Last 30 days</MenuItem>
-                                        <MenuItem value={90}>Last 3 months</MenuItem>
-                                        <MenuItem value={365}>Last year</MenuItem>
-                                    </Select>
-                                </FormControl>
-                            </Box>
-                        </Zoom>
+                            <MenuItem value={7}>Last 7 days</MenuItem>
+                            <MenuItem value={30}>Last 30 days</MenuItem>
+                            <MenuItem value={90}>Last 3 months</MenuItem>
+                            <MenuItem value={365}>Last year</MenuItem>
+                        </Select>
+                    </FormControl>
+                }
+            />
 
-            {/* Overview Metrics */}
-            <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Total Memes"
-                        value={overview.totalMemes}
-                        icon={<AnalyticsIcon />}
-                        growth={growth?.memesGrowth}
-                        color="primary"
-                        variant="detailed"
-                    />
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                <Grid container spacing={3} sx={{ mb: 3 }}>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Total memes"
+                            value={overview.totalMemes}
+                            icon={<AnalyticsIcon />}
+                            growth={growth.memesGrowth}
+                            color="primary"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Total likes"
+                            value={overview.totalLikes}
+                            icon={<LikesIcon />}
+                            color="error"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Total views"
+                            value={overview.totalViews}
+                            icon={<ViewsIcon />}
+                            color="info"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Followers"
+                            value={overview.followersCount}
+                            icon={<FollowersIcon />}
+                            growth={growth.followersGrowth}
+                            color="success"
+                            variant="detailed"
+                        />
+                    </Grid>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Total Likes"
-                        value={overview.totalLikes}
-                        icon={<LikesIcon />}
-                        color="error"
-                        variant="detailed"
-                    />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Total Views"
-                        value={overview.totalViews}
-                        icon={<ViewsIcon />}
-                        color="info"
-                        variant="detailed"
-                    />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Followers"
-                        value={overview.followersCount}
-                        icon={<FollowersIcon />}
-                        growth={growth?.followersGrowth}
-                        color="success"
-                        variant="detailed"
-                    />
-                </Grid>
-            </Grid>
 
-            {/* Secondary Metrics */}
-            <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Total Shares"
-                        value={overview.totalShares}
-                        icon={<SharesIcon />}
-                        color="secondary"
-                        variant="detailed"
-                    />
+                <Grid container spacing={3} sx={{ mb: 4 }}>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Total shares"
+                            value={overview.totalShares}
+                            icon={<SharesIcon />}
+                            color="secondary"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Downloads"
+                            value={overview.totalDownloads}
+                            icon={<DownloadsIcon />}
+                            color="warning"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Comments"
+                            value={overview.totalComments}
+                            icon={<CommentsIcon />}
+                            color="info"
+                            variant="detailed"
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                        <StatCard
+                            title="Avg engagement"
+                            value={overview.avgEngagement}
+                            icon={<TrendingUpIcon />}
+                            color="success"
+                            variant="detailed"
+                        />
+                    </Grid>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Downloads"
-                        value={overview.totalDownloads}
-                        icon={<DownloadsIcon />}
-                        color="warning"
-                        variant="detailed"
-                    />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Comments"
-                        value={overview.totalComments}
-                        icon={<CommentsIcon />}
-                        color="info"
-                        variant="detailed"
-                    />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <StatCard
-                        title="Avg Engagement"
-                        value={overview.avgEngagement}
-                        icon={<TrendingUpIcon />}
-                        color="success"
-                        variant="detailed"
-                    />
-                </Grid>
-            </Grid>
 
-            <Grid container spacing={3}>
-                {/* Top Performing Memes */}
-                <Grid item xs={12} md={6}>
-                    <Card sx={{ height: '100%' }}>
-                        <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                                <TrophyIcon color="warning" sx={{ mr: 1 }} />
-                                <Typography variant="h6">Top Performing Memes</Typography>
-                            </Box>
-                            <List>
-                                {topMemes?.map((meme, index) => (
-                                    <React.Fragment key={meme._id}>
-                                        <ListItem
-                                            sx={{ 
-                                                cursor: 'pointer',
-                                                '&:hover': { backgroundColor: 'action.hover' }
-                                            }}
+                <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                        <Box sx={surfaceSx}>
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                                <TrophyIcon sx={{ color: theme.palette.warning.main }} />
+                                <Typography sx={{ fontWeight: 900 }}>Top performing memes</Typography>
+                            </Stack>
+                            {topMemes.length === 0 ? (
+                                <EmptyState
+                                    icon={<AnalyticsIcon sx={{ fontSize: 40 }} />}
+                                    title="No memes yet"
+                                    description="Create some memes to start seeing insights here."
+                                />
+                            ) : (
+                                <Stack spacing={1.5}>
+                                    {topMemes.map((meme, index) => (
+                                        <Box
+                                            key={meme._id}
                                             onClick={() => navigate(`/meme/${meme._id}`)}
+                                            sx={{
+                                                display: 'flex',
+                                                gap: 2,
+                                                alignItems: 'center',
+                                                p: 1.5,
+                                                borderRadius: 2,
+                                                border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                                cursor: 'pointer',
+                                                transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                                                '&:hover': {
+                                                    transform: 'translate(-2px, -2px)',
+                                                    boxShadow: theme.tokens?.shadow?.sm,
+                                                },
+                                            }}
                                         >
-                                            <ListItemAvatar>
-                                                <Avatar src={meme.imageUrl} variant="rounded">
-                                                    {index + 1}
-                                                </Avatar>
-                                            </ListItemAvatar>
-                                            <ListItemText
-                                                primary={meme.title}
-                                                secondary={
-                                                    <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                                                        <Chip
-                                                            size="small"
-                                                            label={`❤️ ${meme.stats?.likesCount || 0}`}
-                                                            variant="outlined"
-                                                        />
-                                                        <Chip
-                                                            size="small"
-                                                            label={`👁️ ${meme.stats?.views || 0}`}
-                                                            variant="outlined"
-                                                        />
-                                                        <Chip
-                                                            size="small"
-                                                            label={meme.category}
-                                                            color="primary"
-                                                        />
-                                                    </Box>
-                                                }
-                                            />
-                                        </ListItem>
-                                        {index < topMemes.length - 1 && <Divider />}
-                                    </React.Fragment>
-                                ))}
-                                {(!topMemes || topMemes.length === 0) && (
-                                    <ListItem>
-                                        <ListItemText
-                                            primary="No memes yet"
-                                            secondary="Create some memes to see performance data"
-                                        />
-                                    </ListItem>
-                                )}
-                            </List>
-                        </CardContent>
-                    </Card>
-                </Grid>
-
-                {/* Category Performance */}
-                <Grid item xs={12} md={6}>
-                    <Card sx={{ height: '100%' }}>
-                        <CardContent>
-                            <Typography variant="h6" sx={{ mb: 3 }}>
-                                Category Performance
-                            </Typography>
-                            {categoryStats?.map((category) => (
-                                <Box key={category._id} sx={{ mb: 2 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                                        <Typography variant="body2" sx={{ textTransform: 'capitalize' }}>
-                                            {category._id}
-                                        </Typography>
-                                        <Typography variant="body2" color="text.secondary">
-                                            {category.count} memes
-                                        </Typography>
-                                    </Box>
-                                    <LinearProgress
-                                        variant="determinate"
-                                        value={Math.min((category.count / overview.totalMemes) * 100, 100)}
-                                        sx={{ mb: 1 }}
-                                    />
-                                    <Box sx={{ display: 'flex', gap: 1 }}>
-                                        <Chip
-                                            size="small"
-                                            label={`❤️ ${category.totalLikes || 0}`}
-                                            variant="outlined"
-                                        />
-                                        <Chip
-                                            size="small"
-                                            label={`Avg: ${(category.avgLikes || 0).toFixed(1)}`}
-                                            variant="outlined"
-                                        />
-                                    </Box>
-                                </Box>
-                            ))}
-                            {(!categoryStats || categoryStats.length === 0) && (
-                                <Typography variant="body2" color="text.secondary">
-                                    No category data available yet
-                                </Typography>
+                                            <Box sx={{ position: 'relative' }}>
+                                                <Avatar
+                                                    src={meme.imageUrl}
+                                                    variant="rounded"
+                                                    sx={{
+                                                        width: 56,
+                                                        height: 56,
+                                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                                    }}
+                                                />
+                                                <Chip
+                                                    label={`#${index + 1}`}
+                                                    size="small"
+                                                    sx={{
+                                                        position: 'absolute',
+                                                        top: -8,
+                                                        left: -8,
+                                                        fontWeight: 900,
+                                                        background: theme.palette.brand?.accent,
+                                                        color: '#fff',
+                                                    }}
+                                                />
+                                            </Box>
+                                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                                                <Typography sx={{ fontWeight: 800 }} noWrap>
+                                                    {meme.title}
+                                                </Typography>
+                                                <Stack
+                                                    direction="row"
+                                                    spacing={1}
+                                                    sx={{ mt: 0.5 }}
+                                                    useFlexGap
+                                                    flexWrap="wrap"
+                                                >
+                                                    <Chip
+                                                        size="small"
+                                                        icon={<LikesIcon />}
+                                                        label={meme.stats?.likesCount || 0}
+                                                    />
+                                                    <Chip
+                                                        size="small"
+                                                        icon={<ViewsIcon />}
+                                                        label={meme.stats?.views || 0}
+                                                    />
+                                                    <Chip
+                                                        size="small"
+                                                        label={meme.category}
+                                                        sx={{ textTransform: 'capitalize' }}
+                                                        color="primary"
+                                                    />
+                                                </Stack>
+                                            </Box>
+                                        </Box>
+                                    ))}
+                                </Stack>
                             )}
-                        </CardContent>
-                    </Card>
+                        </Box>
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                        <Box sx={surfaceSx}>
+                            <Typography sx={{ fontWeight: 900, mb: 2 }}>
+                                Category performance
+                            </Typography>
+                            {categoryStats.length === 0 ? (
+                                <Typography
+                                    variant="body2"
+                                    sx={{ color: theme.palette.text.secondary }}
+                                >
+                                    No category data yet — post more memes to see a breakdown.
+                                </Typography>
+                            ) : (
+                                <Stack spacing={2}>
+                                    {categoryStats.map((cat) => {
+                                        const percent =
+                                            overview.totalMemes > 0
+                                                ? Math.min((cat.count / overview.totalMemes) * 100, 100)
+                                                : 0;
+                                        return (
+                                            <Box key={cat._id}>
+                                                <Stack
+                                                    direction="row"
+                                                    justifyContent="space-between"
+                                                    sx={{ mb: 0.5 }}
+                                                >
+                                                    <Typography
+                                                        sx={{
+                                                            fontWeight: 800,
+                                                            textTransform: 'capitalize',
+                                                        }}
+                                                    >
+                                                        {cat._id}
+                                                    </Typography>
+                                                    <Typography
+                                                        variant="body2"
+                                                        sx={{ color: theme.palette.text.secondary, fontWeight: 700 }}
+                                                    >
+                                                        {cat.count} memes
+                                                    </Typography>
+                                                </Stack>
+                                                <LinearProgress
+                                                    variant="determinate"
+                                                    value={percent}
+                                                    sx={{ height: 8, borderRadius: 2, mb: 0.75 }}
+                                                />
+                                                <Stack direction="row" spacing={1}>
+                                                    <Chip
+                                                        size="small"
+                                                        icon={<LikesIcon />}
+                                                        label={cat.totalLikes || 0}
+                                                    />
+                                                    <Chip
+                                                        size="small"
+                                                        label={`Avg ${(cat.avgLikes || 0).toFixed(1)}`}
+                                                        variant="outlined"
+                                                    />
+                                                </Stack>
+                                            </Box>
+                                        );
+                                    })}
+                                </Stack>
+                            )}
+                        </Box>
+                    </Grid>
                 </Grid>
-            </Grid>
-                        </Paper>
-                    </Box>
-                </Fade>
             </Container>
         </Box>
     );

@@ -1,351 +1,229 @@
-// 🔐 Login Page Component
-// User authentication login form
+// ============================================================================
+// Login — sign in to an existing account.
+// ----------------------------------------------------------------------------
+// Two-column on desktop (marketing copy + form), single-column on mobile.
+// Dispatches to the AuthContext.login() action and redirects back to the page
+// the user was trying to reach when redirected here.
+// ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    Container,
-    Paper,
-    TextField,
-    Button,
-    Typography,
     Box,
-    Link,
+    Button,
+    Container,
+    TextField,
+    Typography,
     Alert,
     InputAdornment,
     IconButton,
+    Stack,
+    Link as MuiLink,
     CircularProgress,
-    useTheme,
-    Fade,
-    Zoom,
+    Grid,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Visibility,
     VisibilityOff,
     Email as EmailIcon,
     Lock as LockIcon,
+    CheckCircleOutline,
 } from '@mui/icons-material';
 import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
 
 const Login = () => {
+    const theme = useTheme();
     const navigate = useNavigate();
     const location = useLocation();
-    const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode();
     const { login, isAuthenticated, isLoading, error, clearError } = useAuth();
 
-    // Form state
-    const [formData, setFormData] = useState({
-        email: '',
-        password: '',
-    });
+    const [formData, setFormData] = useState({ email: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
-    const [validationErrors, setValidationErrors] = useState({});
+    const [validation, setValidation] = useState({});
 
-    // Get the redirect path from location state
-    const from = location.state?.from?.pathname || '/dashboard';
+    const redirectTo = location.state?.from?.pathname || '/dashboard';
 
-    // Redirect if already authenticated
     useEffect(() => {
-        if (isAuthenticated) {
-            navigate(from, { replace: true });
-        }
-    }, [isAuthenticated, navigate, from]);
+        if (isAuthenticated) navigate(redirectTo, { replace: true });
+    }, [isAuthenticated, navigate, redirectTo]);
 
-    // Clear errors when component mounts (force initial clear)
     useEffect(() => {
         clearError();
-    }, []); // Empty dependency array for initial mount
+        // Run only on mount — clearError is guaranteed stable via useCallback upstream.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    // Clear errors when component mounts
-    useEffect(() => {
-        clearError();
-    }, [clearError]);
-
-    // Handle input changes
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-
-        // Clear validation error for this field
-        if (validationErrors[name]) {
-            setValidationErrors(prev => ({
-                ...prev,
-                [name]: ''
-            }));
-        }
+        setFormData((prev) => ({ ...prev, [name]: value }));
+        if (validation[name]) setValidation((prev) => ({ ...prev, [name]: '' }));
     };
 
-    // Toggle password visibility
-    const handleTogglePassword = () => {
-        setShowPassword(!showPassword);
-    };
-
-    // Validate form
-    const validateForm = () => {
+    const validate = () => {
         const errors = {};
-
-        // Email validation
-        if (!formData.email) {
-            errors.email = 'Email is required';
-        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-            errors.email = 'Please enter a valid email address';
-        }
-
-        // Password validation
-        if (!formData.password) {
-            errors.password = 'Password is required';
-        } else if (formData.password.length < 6) {
-            errors.password = 'Password must be at least 6 characters';
-        }
-
-        setValidationErrors(errors);
+        if (!formData.email) errors.email = 'Enter your email';
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) errors.email = 'That doesn\'t look like a valid email';
+        if (!formData.password) errors.password = 'Enter your password';
+        setValidation(errors);
         return Object.keys(errors).length === 0;
     };
 
-    // Handle form submission
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
-        if (!validateForm()) {
-            return;
-        }
-
+        if (!validate()) return;
         const result = await login(formData);
-        
-        if (result.success) {
-            navigate(from, { replace: true });
-        }
+        if (result?.success) navigate(redirectTo, { replace: true });
     };
 
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            py: 4,
-        }}>
-            <Container maxWidth="sm">
-                <Fade in={true} timeout={1000}>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            p: 6,
-                            background: mode === 'dark'
-                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                            backdropFilter: 'blur(50px)',
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.15)'
-                                : '2px solid rgba(99, 102, 241, 0.15)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.25)'
-                                : '3px solid rgba(99, 102, 241, 0.25)',
-                            borderRadius: '24px',
-                            position: 'relative',
-                            overflow: 'hidden',
-                            boxShadow: mode === 'dark'
-                                ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                            '&::before': {
-                                content: '""',
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                height: '4px',
-                                background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                            },
-                        }}
-                    >
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Box sx={{ textAlign: 'center', mb: 4 }}>
-                                <Typography 
-                                    variant="h3" 
-                                    component="h1" 
-                                    sx={{
-                                        fontWeight: 800,
-                                        mb: 2,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 1.5,
-                                    }}
-                                >
-                                    {/* Theater Masks Emoji - Separate for Natural Colors */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            fontSize: 'inherit',
-                                            filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                            '&:hover': {
-                                                transform: 'scale(1.1) rotate(5deg)',
-                                                transition: 'transform 0.3s ease',
-                                            },
-                                        }}
-                                    >
-                                        🎭
-                                    </Box>
-                                    
-                                    {/* Welcome Back Text with Gradient */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                            backgroundClip: 'text',
-                                            WebkitBackgroundClip: 'text',
-                                            color: 'transparent',
-                                            // Fallback for browsers that don't support background-clip
-                                            '@supports not (-webkit-background-clip: text)': {
-                                                background: 'none',
-                                                color: currentThemeColors?.primary || '#6366f1',
-                                            },
-                                        }}
-                                    >
-                                        Welcome Back
-                                    </Box>
-                                </Typography>
-                                
-                                <Typography 
-                                    variant="h6" 
-                                    sx={{ 
-                                        color: theme.palette.text.secondary,
-                                        fontWeight: 500,
-                                        lineHeight: 1.6,
-                                    }}
-                                >
-                                    Sign in to your MemeStack account to continue creating and sharing memes.
-                                </Typography>
-                            </Box>
-                        </Zoom>
-
-                        {/* Error Alert */}
-                        {error && (
-                            <Fade in={true} timeout={800}>
-                                <Alert 
-                                    severity="error" 
-                                    sx={{ 
-                                        width: '100%', 
-                                        mb: 3,
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(244, 67, 54, 0.1)'
-                                            : 'rgba(244, 67, 54, 0.05)',
-                                        backdropFilter: 'blur(10px)',
-                                        border: '1px solid rgba(244, 67, 54, 0.2)',
-                                    }}
-                                    onClose={clearError}
-                                >
-                                    {error}
-                                </Alert>
-                            </Fade>
-                        )}
-
-                        {/* Enhanced Login Form */}
-                        <Box 
-                            component="form" 
-                            onSubmit={handleSubmit}
-                            sx={{ width: '100%' }}
+        <Box
+            sx={{
+                minHeight: 'calc(100vh - 72px)',
+                background: theme.palette.brand?.bgAlt || theme.palette.background.default,
+                py: { xs: 6, md: 10 },
+            }}
+        >
+            <Container maxWidth="lg">
+                <Grid container spacing={6} alignItems="center">
+                    {/* Marketing side */}
+                    <Grid item xs={12} md={6} sx={{ display: { xs: 'none', md: 'block' } }}>
+                        <Box
+                            sx={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 64,
+                                height: 64,
+                                borderRadius: 2,
+                                border: `2px solid ${theme.palette.brand?.border}`,
+                                background: theme.palette.brand?.gradient,
+                                boxShadow: theme.tokens?.shadow?.md,
+                                fontSize: 36,
+                                color: '#fff',
+                                mb: 3,
+                            }}
                         >
-                            {/* Email Field */}
+                            🎭
+                        </Box>
+                        <Typography
+                            variant="h2"
+                            sx={{
+                                fontWeight: 900,
+                                letterSpacing: '-0.03em',
+                                mb: 2,
+                                fontSize: { md: '3rem' },
+                            }}
+                        >
+                            Welcome back.
+                        </Typography>
+                        <Typography
+                            sx={{
+                                color: theme.palette.text.secondary,
+                                fontSize: '1.125rem',
+                                lineHeight: 1.6,
+                                maxWidth: 440,
+                                mb: 4,
+                            }}
+                        >
+                            Pick up where you left off — your stack, your challenges, your people.
+                        </Typography>
+                        <Stack spacing={1.5}>
+                            {[
+                                'Your drafts and folders are waiting',
+                                'Resume any challenges you joined',
+                                'Keep up with the people you follow',
+                            ].map((line) => (
+                                <Stack key={line} direction="row" spacing={1.5} alignItems="center">
+                                    <CheckCircleOutline sx={{ color: theme.palette.primary.main }} />
+                                    <Typography sx={{ fontWeight: 600 }}>{line}</Typography>
+                                </Stack>
+                            ))}
+                        </Stack>
+                    </Grid>
+
+                    {/* Form side */}
+                    <Grid item xs={12} md={6}>
+                        <Box
+                            component="form"
+                            onSubmit={handleSubmit}
+                            sx={{
+                                p: { xs: 3, sm: 5 },
+                                borderRadius: 4,
+                                border: `2px solid ${theme.palette.brand?.border}`,
+                                background: theme.palette.background.paper,
+                                boxShadow: theme.tokens?.shadow?.lg,
+                                maxWidth: 480,
+                                mx: { xs: 'auto', md: 0 },
+                            }}
+                        >
+                            <Typography variant="h4" sx={{ fontWeight: 900, mb: 0.5 }}>
+                                Log in
+                            </Typography>
+                            <Typography
+                                sx={{ color: theme.palette.text.secondary, mb: 3 }}
+                            >
+                                New here?{' '}
+                                <MuiLink
+                                    component={RouterLink}
+                                    to="/register"
+                                    sx={{ fontWeight: 700, color: theme.palette.primary.main }}
+                                >
+                                    Create an account
+                                </MuiLink>
+                            </Typography>
+
+                            {error && (
+                                <Alert severity="error" onClose={clearError} sx={{ mb: 2.5 }}>
+                                    {typeof error === 'string' ? error : 'Login failed. Try again.'}
+                                </Alert>
+                            )}
+
                             <TextField
                                 fullWidth
-                                id="email"
                                 name="email"
-                                label="Email Address"
+                                label="Email"
                                 type="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                error={!!validationErrors.email}
-                                helperText={validationErrors.email}
-                                margin="normal"
                                 autoComplete="email"
                                 autoFocus
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
+                                value={formData.email}
+                                onChange={handleChange}
+                                error={!!validation.email}
+                                helperText={validation.email}
+                                margin="normal"
                                 InputProps={{
                                     startAdornment: (
                                         <InputAdornment position="start">
-                                            <EmailIcon sx={{ color: theme.palette.primary.main }} />
+                                            <EmailIcon sx={{ color: theme.palette.text.secondary }} />
                                         </InputAdornment>
                                     ),
                                 }}
                             />
 
-                            {/* Password Field */}
                             <TextField
                                 fullWidth
-                                id="password"
                                 name="password"
                                 label="Password"
                                 type={showPassword ? 'text' : 'password'}
+                                autoComplete="current-password"
                                 value={formData.password}
                                 onChange={handleChange}
-                                error={!!validationErrors.password}
-                                helperText={validationErrors.password}
+                                error={!!validation.password}
+                                helperText={validation.password}
                                 margin="normal"
-                                autoComplete="current-password"
-                                sx={{
-                                    '& .MuiOutlinedInput-root': {
-                                        borderRadius: '12px',
-                                        background: mode === 'dark'
-                                            ? 'rgba(255, 255, 255, 0.05)'
-                                            : 'rgba(255, 255, 255, 0.8)',
-                                        backdropFilter: 'blur(10px)',
-                                        '&:hover': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                        '&.Mui-focused': {
-                                            background: mode === 'dark'
-                                                ? 'rgba(255, 255, 255, 0.08)'
-                                                : 'rgba(255, 255, 255, 1)',
-                                        },
-                                    },
-                                }}
                                 InputProps={{
                                     startAdornment: (
                                         <InputAdornment position="start">
-                                            <LockIcon sx={{ color: theme.palette.primary.main }} />
+                                            <LockIcon sx={{ color: theme.palette.text.secondary }} />
                                         </InputAdornment>
                                     ),
                                     endAdornment: (
                                         <InputAdornment position="end">
                                             <IconButton
                                                 aria-label="toggle password visibility"
-                                                onClick={handleTogglePassword}
+                                                onClick={() => setShowPassword((s) => !s)}
                                                 edge="end"
-                                                sx={{
-                                                    color: theme.palette.primary.main,
-                                                    '&:hover': {
-                                                        background: 'rgba(99, 102, 241, 0.1)',
-                                                    },
-                                                }}
                                             >
                                                 {showPassword ? <VisibilityOff /> : <Visibility />}
                                             </IconButton>
@@ -354,144 +232,35 @@ const Login = () => {
                                 }}
                             />
 
-                            {/* Enhanced Submit Button */}
                             <Button
                                 type="submit"
                                 fullWidth
-                                variant="contained"
                                 size="large"
+                                variant="contained"
                                 disabled={isLoading}
-                                sx={{ 
-                                    mt: 4, 
-                                    mb: 3,
-                                    py: 2,
-                                    fontWeight: 600,
-                                    fontSize: '1.1rem',
-                                    borderRadius: '12px',
-                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                    textTransform: 'none',
-                                    boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                    '&:hover': {
-                                        background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#5b5bf6'}, ${currentThemeColors?.secondary || '#7c3aed'})`,
-                                        boxShadow: `0 12px 40px ${currentThemeColors?.primary || '#6366f1'}60`,
-                                        transform: 'translateY(-2px)',
-                                    },
-                                    '&:disabled': {
-                                        background: `${currentThemeColors?.primary || '#6366f1'}80`,
-                                        color: 'white',
-                                    },
-                                }}
+                                sx={{ mt: 3, py: 1.5, fontSize: '1rem', fontWeight: 800 }}
                             >
-                                {isLoading ? (
-                                    <CircularProgress size={24} color="inherit" />
-                                ) : (
-                                    'Sign In'
-                                )}
+                                {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Log in'}
                             </Button>
 
-                            {/* Enhanced Links */}
-                            <Box sx={{ textAlign: 'center' }}>
-                                <Link
+                            <Box sx={{ textAlign: 'center', mt: 2.5 }}>
+                                <MuiLink
                                     component={RouterLink}
                                     to="/forgot-password"
-                                    variant="body2"
-                                    sx={{ 
-                                        display: 'block', 
-                                        mb: 3,
-                                        color: theme.palette.primary.main,
-                                        fontWeight: 500,
+                                    sx={{
+                                        fontSize: '0.875rem',
+                                        color: theme.palette.text.secondary,
+                                        fontWeight: 600,
                                         textDecoration: 'none',
-                                        '&:hover': { 
-                                            textDecoration: 'underline',
-                                            color: theme.palette.primary.dark,
-                                        }
+                                        '&:hover': { color: theme.palette.primary.main },
                                     }}
                                 >
                                     Forgot your password?
-                                </Link>
-                                
-                                <Paper
-                                    elevation={0}
-                                    sx={{
-                                        p: 2,
-                                        background: mode === 'dark'
-                                            ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                            : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.75) 100%)',
-                                        backdropFilter: 'blur(40px)',
-                                        border: mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.12)'
-                                            : '2px solid rgba(99, 102, 241, 0.12)',
-                                        borderTop: mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.2)'
-                                            : '3px solid rgba(99, 102, 241, 0.2)',
-                                        borderRadius: '12px',
-                                        boxShadow: mode === 'dark'
-                                            ? '0 8px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                            : '0 8px 30px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                    }}
-                                >
-                                    <Typography 
-                                        variant="body2" 
-                                        sx={{ color: theme.palette.text.secondary }}
-                                    >
-                                        Don't have an account?{' '}
-                                        <Link
-                                            component={RouterLink}
-                                            to="/register"
-                                            sx={{ 
-                                                fontWeight: 600,
-                                                color: theme.palette.primary.main,
-                                                textDecoration: 'none',
-                                                '&:hover': { 
-                                                    textDecoration: 'underline',
-                                                    color: theme.palette.primary.dark,
-                                                }
-                                            }}
-                                        >
-                                            Sign up here
-                                        </Link>
-                                    </Typography>
-                                </Paper>
+                                </MuiLink>
                             </Box>
                         </Box>
-                    </Paper>
-                </Fade>
-
-                {/* Enhanced Additional Info */}
-                <Fade in={true} timeout={1500}>
-                    <Box sx={{ mt: 4, textAlign: 'center' }}>
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                p: 3,
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.75) 100%)',
-                                backdropFilter: 'blur(40px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.12)'
-                                    : '2px solid rgba(99, 102, 241, 0.12)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.2)'
-                                    : '3px solid rgba(99, 102, 241, 0.2)',
-                                borderRadius: '16px',
-                                boxShadow: mode === 'dark'
-                                    ? '0 8px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                    : '0 8px 30px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                            }}
-                        >
-                            <Typography 
-                                variant="body2" 
-                                sx={{ 
-                                    color: theme.palette.text.secondary,
-                                    fontWeight: 500,
-                                }}
-                            >
-                                🔒 Your data is secure and protected with industry-standard encryption.
-                            </Typography>
-                        </Paper>
-                    </Box>
-                </Fade>
+                    </Grid>
+                </Grid>
             </Container>
         </Box>
     );

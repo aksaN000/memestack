@@ -1,1271 +1,392 @@
-// 🔗 API Service Layer
-// This handles all communication with our backend API
+// ==========================================================================
+// MemeStack API client — single source of truth for backend calls.
+//
+// One axios instance, one auth interceptor, one 401 handler. All feature
+// API surfaces (auth / memes / templates / collaborations / …) are grouped
+// below and share the same instance.
+//
+// Every method returns the parsed response body (success + data + etc),
+// and throws a normalized { message, status, data } object on failure so
+// callers can always `catch (err) { setError(err.message) }`.
+// ==========================================================================
 
 import axios from 'axios';
 
-// Create axios instance with base configuration
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
 const API = axios.create({
-    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
-    timeout: 10000,
-    headers: {
-        'Content-Type': 'application/json',
-    },
+    baseURL: API_URL,
+    timeout: 20000,
+    headers: { 'Content-Type': 'application/json' },
 });
 
-// ========================================
-// INTERCEPTORS
-// ========================================
+// ---- request interceptor -------------------------------------------------
+API.interceptors.request.use((config) => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+});
 
-// Request interceptor - Add auth token to requests
-API.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem('token');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    },
-    (error) => {
-        return Promise.reject(error);
-    }
-);
-
-// Response interceptor - Handle global errors
+// ---- response interceptor ------------------------------------------------
+// Normalizes the error shape and handles expired tokens centrally.
 API.interceptors.response.use(
-    (response) => {
-        return response;
-    },
+    (response) => response,
     (error) => {
-        // Handle network errors
+        // Network / CORS / offline
         if (!error.response) {
-            console.error('Network Error:', error.message);
-            // Check if backend is running
-            if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
-                const backendRunning = error.config?.url?.includes('localhost:5000');
-                if (backendRunning) {
-                    error.message = 'Backend server is not running. Please start the backend server on port 5000.';
-                }
-            }
-            return Promise.reject(error);
+            return Promise.reject({
+                message:
+                    error.code === 'ECONNABORTED'
+                        ? 'Request timed out. Please try again.'
+                        : 'Unable to reach the server. Check your connection and try again.',
+                status: 0,
+                data: null,
+            });
         }
 
-        // Handle HTTP errors
-        if (error.response?.status === 401) {
-            // Token expired or invalid
+        // Expired / invalid token → log out
+        if (error.response.status === 401) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
-            // Only redirect if not already on login page
-            if (!window.location.pathname.includes('/login')) {
+            if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
                 window.location.href = '/login';
             }
         }
-        
-        // Log API errors for debugging
-        console.error('API Error:', {
-            status: error.response?.status,
-            url: error.config?.url,
-            method: error.config?.method,
-            data: error.response?.data
+
+        return Promise.reject({
+            message:
+                error.response.data?.message ||
+                (error.response.status >= 500
+                    ? 'Something broke on our end. Please try again shortly.'
+                    : 'Request failed.'),
+            status: error.response.status,
+            data: error.response.data || null,
         });
-        
-        return Promise.reject(error);
-    }
+    },
 );
 
-// ========================================
-// AUTHENTICATION SERVICES
-// ========================================
+// Helper: unwrap `response.data` while preserving the original
+// {success, data, …} envelope so callers can read either shape.
+const unwrap = (promise) => promise.then((r) => r.data);
 
+// ==========================================================================
+// AUTH
+// ==========================================================================
 export const authAPI = {
-    // Register new user
     register: async (userData) => {
-        try {
-            const response = await API.post('/auth/register', userData);
-            if (response.data.success && response.data.token) {
-                localStorage.setItem('token', response.data.token);
-                localStorage.setItem('user', JSON.stringify(response.data.user));
-            }
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Registration failed' };
+        const data = await unwrap(API.post('/auth/register', userData));
+        if (data?.success && data.token) {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
         }
+        return data;
     },
 
-    // Login user
     login: async (credentials) => {
-        try {
-            // Transform email to identifier for backend compatibility
-            const loginData = {
-                identifier: credentials.email || credentials.identifier,
-                password: credentials.password
-            };
-            
-            const response = await API.post('/auth/login', loginData);
-            if (response.data.success && response.data.token) {
-                localStorage.setItem('token', response.data.token);
-                localStorage.setItem('user', JSON.stringify(response.data.user));
-            }
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Login failed' };
+        const loginData = {
+            identifier: credentials.email || credentials.identifier,
+            password: credentials.password,
+        };
+        const data = await unwrap(API.post('/auth/login', loginData));
+        if (data?.success && data.token) {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
         }
+        return data;
     },
 
-    // Logout user
     logout: async () => {
         try {
             await API.post('/auth/logout');
-        } catch (error) {
-            console.error('Logout error:', error);
+        } catch (_) {
+            // ignore — local state still gets cleared below
         } finally {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
         }
     },
 
-    // Get current user profile
-    getProfile: async () => {
-        try {
-            const response = await API.get('/auth/profile');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get profile' };
-        }
-    },
-
-    // Update user profile
+    getProfile: () => unwrap(API.get('/auth/profile')),
     updateProfile: async (profileData) => {
-        try {
-            const response = await API.put('/auth/profile', profileData);
-            if (response.data.success && response.data.user) {
-                localStorage.setItem('user', JSON.stringify(response.data.user));
-            }
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update profile' };
+        const data = await unwrap(API.put('/auth/profile', profileData));
+        if (data?.success && data.user) {
+            localStorage.setItem('user', JSON.stringify(data.user));
         }
+        return data;
     },
 };
 
-// ========================================
-// MEME SERVICES
-// ========================================
-
+// ==========================================================================
+// MEMES
+// ==========================================================================
 export const memeAPI = {
-    // Get all public memes with pagination and filters
-    getAllMemes: async (params = {}) => {
-        try {
-            const response = await API.get('/memes', { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch memes' };
-        }
-    },
-
-    // Get trending memes
-    getTrendingMemes: async (limit = 10) => {
-        try {
-            const response = await API.get('/memes/trending', { params: { limit } });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch trending memes' };
-        }
-    },
-
-    // Get memes by category
-    getMemesByCategory: async (category, params = {}) => {
-        try {
-            const response = await API.get(`/memes/category/${category}`, { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch memes by category' };
-        }
-    },
-
-    // Get single meme by ID
-    getMemeById: async (id) => {
-        try {
-            const response = await API.get(`/memes/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch meme' };
-        }
-    },
-
-    // Create new meme
-    createMeme: async (memeData) => {
-        try {
-            const response = await API.post('/memes', memeData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create meme' };
-        }
-    },
-
-    // Update meme
-    updateMeme: async (id, memeData) => {
-        try {
-            const response = await API.put(`/memes/${id}`, memeData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update meme' };
-        }
-    },
-
-    // Delete meme
-    deleteMeme: async (id) => {
-        try {
-            const response = await API.delete(`/memes/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to delete meme' };
-        }
-    },
-
-    // Like/Unlike meme
-    toggleLike: async (id) => {
-        try {
-            const response = await API.post(`/memes/${id}/like`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to toggle like' };
-        }
-    },
-
-    // Share meme
-    shareMeme: async (id) => {
-        try {
-            const response = await API.post(`/memes/${id}/share`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to share meme' };
-        }
-    },
-
-    // Download meme
-    downloadMeme: async (id) => {
-        try {
-            const response = await API.get(`/memes/${id}/download`, {
-                responseType: 'blob' // Important for file downloads
-            });
-            return response;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to download meme' };
-        }
-    },
-
-    // Get current user's memes
-    getMyMemes: async (includePrivate = true) => {
-        try {
-            const response = await API.get('/memes/my-memes', {
-                params: { includePrivate }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch your memes' };
-        }
-    },
-
-    // Get memes by specific user
-    getUserMemes: async (userId = null) => {
-        try {
-            const endpoint = userId ? `/memes/user/${userId}` : '/memes/my-memes';
-            const response = await API.get(endpoint);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user memes' };
-        }
-    },
-
-    // Get meme statistics
-    getStats: async () => {
-        try {
-            const response = await API.get('/memes/stats');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch statistics' };
-        }
-    },
+    getAllMemes: (params = {}) => unwrap(API.get('/memes', { params })),
+    getTrendingMemes: (limit = 10) => unwrap(API.get('/memes/trending', { params: { limit } })),
+    getMemesByCategory: (category, params = {}) => unwrap(API.get(`/memes/category/${category}`, { params })),
+    getMemeById: (id) => unwrap(API.get(`/memes/${id}`)),
+    createMeme: (memeData) => unwrap(API.post('/memes', memeData)),
+    updateMeme: (id, memeData) => unwrap(API.put(`/memes/${id}`, memeData)),
+    deleteMeme: (id) => unwrap(API.delete(`/memes/${id}`)),
+    toggleLike: (id) => unwrap(API.post(`/memes/${id}/like`)),
+    shareMeme: (id) => unwrap(API.post(`/memes/${id}/share`)),
+    downloadMeme: (id) => API.get(`/memes/${id}/download`, { responseType: 'blob' }),
+    getMyMemes: (includePrivate = true) => unwrap(API.get('/memes/my-memes', { params: { includePrivate } })),
+    getUserMemes: (userId = null) =>
+        unwrap(API.get(userId ? `/memes/user/${userId}` : '/memes/my-memes')),
+    getStats: () => unwrap(API.get('/memes/stats')),
 };
 
-// ========================================
-// FILE UPLOAD SERVICES
-// ========================================
+// ==========================================================================
+// UPLOADS
+// ==========================================================================
+const withProgress = (onUploadProgress) =>
+    onUploadProgress
+        ? {
+              headers: { 'Content-Type': 'multipart/form-data' },
+              onUploadProgress: (e) => {
+                  if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total));
+              },
+          }
+        : { headers: { 'Content-Type': 'multipart/form-data' } };
 
 export const uploadAPI = {
-    // Upload meme image
-    uploadMeme: async (file, onUploadProgress) => {
-        try {
-            const formData = new FormData();
-            formData.append('meme', file);
-
-            const response = await API.post('/upload/meme', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-                onUploadProgress: onUploadProgress ? (progressEvent) => {
-                    const percentCompleted = Math.round(
-                        (progressEvent.loaded * 100) / progressEvent.total
-                    );
-                    onUploadProgress(percentCompleted);
-                } : undefined,
-            });
-
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to upload file' };
-        }
+    uploadMeme: (file, onUploadProgress) => {
+        const fd = new FormData();
+        fd.append('meme', file);
+        return unwrap(API.post('/upload/meme', fd, withProgress(onUploadProgress)));
     },
-
-    // Upload avatar/profile picture
-    uploadAvatar: async (file, onUploadProgress) => {
-        try {
-            const formData = new FormData();
-            formData.append('avatar', file);
-
-            const response = await API.post('/upload/avatar', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-                onUploadProgress: onUploadProgress ? (progressEvent) => {
-                    const percentCompleted = Math.round(
-                        (progressEvent.loaded * 100) / progressEvent.total
-                    );
-                    onUploadProgress(percentCompleted);
-                } : undefined,
-            });
-
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to upload avatar' };
-        }
+    uploadAvatar: (file, onUploadProgress) => {
+        const fd = new FormData();
+        fd.append('avatar', file);
+        return unwrap(API.post('/upload/avatar', fd, withProgress(onUploadProgress)));
     },
-
-    // Get upload guidelines
-    getGuidelines: async () => {
-        try {
-            const response = await API.get('/upload/guidelines');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch guidelines' };
-        }
-    },
+    getHealth: () => unwrap(API.get('/upload/health')),
 };
 
-// ========================================
-// FOLLOW SERVICES
-// ========================================
-
+// ==========================================================================
+// FOLLOWS
+// ==========================================================================
 export const followAPI = {
-    // Follow a user
-    followUser: async (userId) => {
-        try {
-            const response = await API.post(`/follows/${userId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to follow user' };
-        }
-    },
-
-    // Unfollow a user
-    unfollowUser: async (userId) => {
-        try {
-            const response = await API.delete(`/follows/${userId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to unfollow user' };
-        }
-    },
-
-    // Check if following a user
-    getFollowStatus: async (userId) => {
-        try {
-            const response = await API.get(`/follows/${userId}/status`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get follow status' };
-        }
-    },
-
-    // Get user's followers
-    getFollowers: async (userId, params = {}) => {
-        try {
-            const response = await API.get(`/follows/${userId}/followers`, { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get followers' };
-        }
-    },
-
-    // Get user's following list
-    getFollowing: async (userId, params = {}) => {
-        try {
-            const response = await API.get(`/follows/${userId}/following`, { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get following list' };
-        }
-    },
-
-    // Get feed from followed users
-    getFollowingFeed: async (params = {}) => {
-        try {
-            const response = await API.get('/follows/feed', { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get following feed' };
-        }
-    },
+    followUser: (userId) => unwrap(API.post(`/follows/${userId}`)),
+    unfollowUser: (userId) => unwrap(API.delete(`/follows/${userId}`)),
+    getFollowStatus: (userId) => unwrap(API.get(`/follows/${userId}/status`)),
+    getFollowers: (userId, params = {}) => unwrap(API.get(`/follows/${userId}/followers`, { params })),
+    getFollowing: (userId, params = {}) => unwrap(API.get(`/follows/${userId}/following`, { params })),
+    getFollowingFeed: (params = {}) => unwrap(API.get('/follows/feed', { params })),
 };
 
-// ========================================
-// TEMPLATES API
-// ========================================
+// ==========================================================================
+// TEMPLATES
+// ==========================================================================
+const templateFormData = (templateData) => {
+    const fd = new FormData();
+    if (templateData.image) fd.append('image', templateData.image);
+    if (templateData.name) fd.append('name', templateData.name);
+    if (templateData.category) fd.append('category', templateData.category);
+    if (templateData.description !== undefined) fd.append('description', templateData.description);
+    if (templateData.textAreas) fd.append('textAreas', JSON.stringify(templateData.textAreas));
+    if (templateData.dimensions) fd.append('dimensions', JSON.stringify(templateData.dimensions));
+    if (templateData.isPublic !== undefined) fd.append('isPublic', templateData.isPublic ? 'true' : 'false');
+    return fd;
+};
 
 export const templatesAPI = {
-    // Get all templates
-    getTemplates: async (params = {}) => {
-        try {
-            const response = await API.get('/templates', { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch templates' };
-        }
-    },
-
-    // Get template by ID
-    getTemplateById: async (id) => {
-        try {
-            const response = await API.get(`/templates/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch template' };
-        }
-    },
-
-    // Create new template
-    createTemplate: async (templateData) => {
-        try {
-            const formData = new FormData();
-            
-            // Add image file
-            if (templateData.image) {
-                formData.append('image', templateData.image);
-            }
-            
-            // Add other fields
-            formData.append('name', templateData.name);
-            if (templateData.category) formData.append('category', templateData.category);
-            if (templateData.description) formData.append('description', templateData.description);
-            if (templateData.textAreas) formData.append('textAreas', JSON.stringify(templateData.textAreas));
-            if (templateData.dimensions) formData.append('dimensions', JSON.stringify(templateData.dimensions));
-            formData.append('isPublic', templateData.isPublic ? 'true' : 'false');
-
-            const response = await API.post('/templates', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create template' };
-        }
-    },
-
-    // Update template
-    updateTemplate: async (id, templateData) => {
-        try {
-            const response = await API.put(`/templates/${id}`, templateData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update template' };
-        }
-    },
-
-    // Delete template
-    deleteTemplate: async (id) => {
-        try {
-            const response = await API.delete(`/templates/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to delete template' };
-        }
-    },
-
-    // Get template categories
-    getCategories: async () => {
-        try {
-            const response = await API.get('/templates/categories');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch template categories' };
-        }
-    },
-
-    // Get user's templates
-    getUserTemplates: async () => {
-        try {
-            const response = await API.get('/templates/my-templates');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user templates' };
-        }
-    },
-
-    // Get trending templates
-    getTrending: async () => {
-        try {
-            const response = await API.get('/templates/trending');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch trending templates' };
-        }
-    },
-
-    // Get favorite templates
-    getFavoriteTemplates: async () => {
-        try {
-            const response = await API.get('/templates/favorites');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch favorite templates' };
-        }
-    },
-
-    // Favorite a template
-    favoriteTemplate: async (templateId) => {
-        try {
-            const response = await API.post(`/templates/${templateId}/favorite`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to favorite template' };
-        }
-    },
-
-    // Unfavorite a template
-    unfavoriteTemplate: async (templateId) => {
-        try {
-            const response = await API.delete(`/templates/${templateId}/favorite`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to unfavorite template' };
-        }
-    },
-
-    // Rate a template
-    rateTemplate: async (templateId, rating) => {
-        try {
-            const response = await API.post(`/templates/${templateId}/rate`, { rating });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to rate template' };
-        }
-    },
-
-    // Download template
-    downloadTemplate: async (templateId) => {
-        try {
-            const response = await API.get(`/templates/${templateId}/download`, {
-                responseType: 'blob'
-            });
-            return response;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to download template' };
-        }
-    },
-
-    // Track template usage (when actually used to create a meme)
-    trackTemplateUsage: async (templateId) => {
-        try {
-            const response = await API.post(`/templates/${templateId}/use`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to track template usage' };
-        }
-    }
+    getTemplates: (params = {}) => unwrap(API.get('/templates', { params })),
+    getTemplateById: (id) => unwrap(API.get(`/templates/${id}`)),
+    createTemplate: (templateData) =>
+        unwrap(
+            API.post('/templates', templateFormData(templateData), {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            }),
+        ),
+    updateTemplate: (id, templateData) =>
+        unwrap(
+            API.put(`/templates/${id}`, templateFormData(templateData), {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            }),
+        ),
+    deleteTemplate: (id) => unwrap(API.delete(`/templates/${id}`)),
+    getCategories: () => unwrap(API.get('/templates/categories')),
+    getUserTemplates: (params = {}) => unwrap(API.get('/templates/my-templates', { params })),
+    getTrending: () => unwrap(API.get('/templates/trending')),
+    getFavoriteTemplates: () => unwrap(API.get('/templates/favorites')),
+    favoriteTemplate: (id) => unwrap(API.post(`/templates/${id}/favorite`)),
+    unfavoriteTemplate: (id) => unwrap(API.delete(`/templates/${id}/favorite`)),
+    rateTemplate: (id, rating) => unwrap(API.post(`/templates/${id}/rate`, { rating })),
+    downloadTemplate: (id) => API.get(`/templates/${id}/download`, { responseType: 'blob' }),
+    trackTemplateUsage: (id) => unwrap(API.post(`/templates/${id}/use`)),
 };
 
-// ========================================
-// USER SERVICES
-// ========================================
-
+// ==========================================================================
+// USERS
+// ==========================================================================
 export const userAPI = {
-    // Get all users for browsing/discovery
-    getUsers: async (params = {}) => {
-        try {
-            const response = await API.get('/users', { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch users' };
-        }
-    },
-
-    // Get user profile by ID
-    getUserById: async (userId) => {
-        try {
-            const response = await API.get(`/users/${userId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get user profile' };
-        }
-    },
+    getUsers: (params = {}) => unwrap(API.get('/users', { params })),
+    getUserById: (userId) => unwrap(API.get(`/users/${userId}`)),
 };
 
-// ========================================
-// ANALYTICS API
-// ========================================
-
+// ==========================================================================
+// ANALYTICS
+// ==========================================================================
 export const analyticsAPI = {
-    // Get dashboard analytics
-    getDashboard: async (timeRange = '30') => {
-        try {
-            const response = await API.get('/analytics/dashboard', {
-                params: { timeRange }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch dashboard analytics' };
-        }
-    },
-
-    // Get meme analytics
-    getMemeAnalytics: async (memeId) => {
-        try {
-            const response = await API.get(`/analytics/meme/${memeId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch meme analytics' };
-        }
-    },
-
-    // Get platform analytics
-    getPlatformAnalytics: async () => {
-        try {
-            const response = await API.get('/analytics/platform');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch platform analytics' };
-        }
-    }
+    getDashboard: (timeRange = '30') => unwrap(API.get('/analytics/dashboard', { params: { timeRange } })),
+    getMemeAnalytics: (memeId) => unwrap(API.get(`/analytics/meme/${memeId}`)),
+    getPlatformAnalytics: () => unwrap(API.get('/analytics/platform')),
 };
 
-// ========================================
-// FOLDERS API
-// ========================================
-
+// ==========================================================================
+// FOLDERS
+// ==========================================================================
 export const foldersAPI = {
-    // Get user folders
-    getFolders: async (params = {}) => {
-        try {
-            const response = await API.get('/folders', { params });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch folders' };
-        }
-    },
-
-    // Get folder by ID
-    getFolderById: async (id) => {
-        try {
-            const response = await API.get(`/folders/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch folder' };
-        }
-    },
-
-    // Create new folder
-    createFolder: async (folderData) => {
-        try {
-            const response = await API.post('/folders', folderData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create folder' };
-        }
-    },
-
-    // Update folder
-    updateFolder: async (id, folderData) => {
-        try {
-            const response = await API.put(`/folders/${id}`, folderData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update folder' };
-        }
-    },
-
-    // Delete folder
-    deleteFolder: async (id) => {
-        try {
-            const response = await API.delete(`/folders/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to delete folder' };
-        }
-    },
-
-    // Add meme to folder
-    addMemeToFolder: async (folderId, memeId) => {
-        try {
-            const response = await API.post(`/folders/${folderId}/memes/${memeId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to add meme to folder' };
-        }
-    },
-
-    // Remove meme from folder
-    removeMemeFromFolder: async (folderId, memeId) => {
-        try {
-            const response = await API.delete(`/folders/${folderId}/memes/${memeId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to remove meme from folder' };
-        }
-    },
-
-    // Bulk add memes to folder
-    bulkAddMemesToFolder: async (folderId, memeIds) => {
-        try {
-            const response = await API.post(`/folders/${folderId}/memes/bulk`, { memeIds });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to add memes to folder' };
-        }
-    },
-
-    // Generate share link for folder
-    generateShareLink: async (folderId) => {
-        try {
-            const response = await API.post(`/folders/${folderId}/share`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to generate share link' };
-        }
-    }
+    getFolders: (params = {}) => unwrap(API.get('/folders', { params })),
+    getFolderById: (id) => unwrap(API.get(`/folders/${id}`)),
+    createFolder: (folderData) => unwrap(API.post('/folders', folderData)),
+    updateFolder: (id, folderData) => unwrap(API.put(`/folders/${id}`, folderData)),
+    deleteFolder: (id) => unwrap(API.delete(`/folders/${id}`)),
+    addMemeToFolder: (folderId, memeId) => unwrap(API.post(`/folders/${folderId}/memes/${memeId}`)),
+    removeMemeFromFolder: (folderId, memeId) => unwrap(API.delete(`/folders/${folderId}/memes/${memeId}`)),
+    bulkAddMemesToFolder: (folderId, memeIds) => unwrap(API.post(`/folders/${folderId}/memes/bulk`, { memeIds })),
+    generateShareLink: (folderId) => unwrap(API.post(`/folders/${folderId}/share`)),
+    getSharedFolder: (token) => unwrap(API.get(`/folders/shared/${token}`)),
 };
 
+// ==========================================================================
+// COMMENTS
+// ==========================================================================
+export const commentsAPI = {
+    getComments: (memeId, options = {}) => unwrap(API.get(`/comments/memes/${memeId}/comments`, { params: options })),
+    addComment: (memeId, commentData) => unwrap(API.post(`/comments/memes/${memeId}/comments`, commentData)),
+    updateComment: (commentId, commentData) => unwrap(API.put(`/comments/${commentId}`, commentData)),
+    deleteComment: (commentId) => unwrap(API.delete(`/comments/${commentId}`)),
+    toggleLikeComment: (commentId) => unwrap(API.post(`/comments/${commentId}/like`)),
+    getReplies: (commentId, options = {}) => unwrap(API.get(`/comments/${commentId}/replies`, { params: options })),
+    reportComment: (commentId, reportData) => unwrap(API.post(`/comments/${commentId}/report`, reportData)),
+    getUserComments: (userId, options = {}) => unwrap(API.get(`/comments/users/${userId}/comments`, { params: options })),
+};
 
-// ========================================
-// HEALTH CHECK API
-// ========================================
+// ==========================================================================
+// MODERATION
+// ==========================================================================
+export const moderationAPI = {
+    submitReport: (reportData) => unwrap(API.post('/moderation/report', reportData)),
+    getReports: (filters = {}) => unwrap(API.get('/moderation/reports', { params: filters })),
+    reviewReport: (reportId, action, reason) =>
+        unwrap(API.put(`/moderation/reports/${reportId}/review`, { action, reason })),
+    dismissReport: (reportId, reason) => unwrap(API.put(`/moderation/reports/${reportId}/dismiss`, { reason })),
+    getDashboard: () => unwrap(API.get('/moderation/dashboard')),
+    warnUser: (userId, reason, reportId) => unwrap(API.post(`/moderation/users/${userId}/warn`, { reason, reportId })),
+    suspendUser: (userId, reason, days, reportId) =>
+        unwrap(API.post(`/moderation/users/${userId}/suspend`, { reason, days, reportId })),
+    banUser: (userId, reason, reportId) => unwrap(API.post(`/moderation/users/${userId}/ban`, { reason, reportId })),
+    unbanUser: (userId) => unwrap(API.post(`/moderation/users/${userId}/unban`)),
+};
 
+// ==========================================================================
+// GROUPS
+// ==========================================================================
+export const groupsAPI = {
+    getGroups: (options = {}) => unwrap(API.get('/groups', { params: options })),
+    getTrending: () => unwrap(API.get('/groups/trending')),
+    getUserGroups: () => unwrap(API.get('/groups/user/groups')),
+};
+
+// ==========================================================================
+// CHALLENGES
+// ==========================================================================
+export const challengesAPI = {
+    getChallenges: (options = {}) => unwrap(API.get('/challenges', { params: options })),
+    getTrending: () => unwrap(API.get('/challenges/trending')),
+    getUserChallenges: () => unwrap(API.get('/challenges/user/challenges')),
+};
+
+// ==========================================================================
+// COLLABORATIONS
+// ==========================================================================
+export const collaborationsAPI = {
+    getCollaborations: (options = {}) => unwrap(API.get('/collaborations', { params: options })),
+    getTrending: () => unwrap(API.get('/collaborations/trending')),
+    getUserCollaborations: () => unwrap(API.get('/collaborations/user/collaborations')),
+    getCollaborationById: (id) => unwrap(API.get(`/collaborations/${id}`)),
+    createCollaboration: (collaborationData) => unwrap(API.post('/collaborations', collaborationData)),
+    updateCollaboration: (id, updates) => unwrap(API.put(`/collaborations/${id}`, updates)),
+    joinCollaboration: (id, message = '') => unwrap(API.post(`/collaborations/${id}/join`, { message })),
+    inviteUser: (id, username, role = 'contributor', message = '') =>
+        unwrap(API.post(`/collaborations/${id}/invite`, { username, role, message })),
+    createVersion: (id, versionData) => unwrap(API.post(`/collaborations/${id}/versions`, versionData)),
+    forkCollaboration: (id, title) => {
+        const body = title && title.trim() ? { title: title.trim() } : {};
+        return unwrap(API.post(`/collaborations/${id}/fork`, body));
+    },
+    addComment: (id, commentData) => unwrap(API.post(`/collaborations/${id}/comments`, commentData)),
+    removeCollaborator: (id, collaboratorId) => unwrap(API.delete(`/collaborations/${id}/collaborators/${collaboratorId}`)),
+    updateCollaboratorRole: (id, collaboratorId, role) =>
+        unwrap(API.put(`/collaborations/${id}/collaborators/${collaboratorId}/role`, { role })),
+    acceptInvite: (id) => unwrap(API.post(`/collaborations/${id}/invites/accept`)),
+    declineInvite: (id) => unwrap(API.post(`/collaborations/${id}/invites/decline`)),
+    getPendingInvites: () => unwrap(API.get('/collaborations/user/invites')),
+    getMemeRemixes: (memeId) => unwrap(API.get(`/collaborations/meme/${memeId}/remixes`)),
+    deleteCollaboration: (id) => unwrap(API.delete(`/collaborations/${id}`)),
+
+    // advanced
+    getTemplates: async (category = null) => {
+        const data = await unwrap(API.get('/collaborations/templates', { params: category ? { category } : {} }));
+        return data?.templates || [];
+    },
+    createFromTemplate: (data) => unwrap(API.post('/collaborations/from-template', data)),
+    getInsights: async (id) => {
+        const data = await unwrap(API.get(`/collaborations/${id}/insights`));
+        return data?.insights || null;
+    },
+    getActivity: (id, limit = 20) => unwrap(API.get(`/collaborations/${id}/activity`, { params: { limit } })),
+    getStats: (id) => unwrap(API.get(`/collaborations/${id}/stats`)),
+    trackActivity: (id, action, details = {}) =>
+        unwrap(API.post(`/collaborations/${id}/track-activity`, { action, details })),
+    mergeFork: (parentId, forkId, mergeOptions = {}) =>
+        unwrap(API.post(`/collaborations/${parentId}/merge-fork`, { forkId, mergeOptions })),
+    bulkOperations: (operation, collaborationIds, data = {}) =>
+        unwrap(API.post('/collaborations/bulk-operations', { operation, collaborationIds, data })),
+};
+
+// ==========================================================================
+// HEALTH
+// ==========================================================================
 export const healthAPI = {
-    // Check API health
-    checkHealth: async () => {
-        try {
-            const response = await API.get('/health');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to check API health' };
-        }
-    }
+    checkHealth: () => unwrap(API.get('/health')),
 };
 
-// ========================================
-// UTILITY FUNCTIONS
-// ========================================
-
-// Get current user from localStorage
+// ==========================================================================
+// UTILITIES
+// ==========================================================================
 export const getCurrentUser = () => {
     try {
         const user = localStorage.getItem('user');
         return user ? JSON.parse(user) : null;
-    } catch (error) {
-        console.error('Error parsing user from localStorage:', error);
+    } catch {
         return null;
     }
 };
 
-// Check if user is authenticated
-export const isAuthenticated = () => {
-    const token = localStorage.getItem('token');
-    const user = getCurrentUser();
-    return !!(token && user);
-};
+export const isAuthenticated = () => !!(localStorage.getItem('token') && getCurrentUser());
 
-// Get auth token
-export const getToken = () => {
-    return localStorage.getItem('token');
-};
+export const getToken = () => localStorage.getItem('token');
 
-// Clear auth data
 export const clearAuthData = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
 };
 
-// Error handler helper
+/**
+ * Pull a useful string out of whatever shape an error has.
+ * Works with the normalized `{message}` thrown by the interceptor and
+ * with stray raw-axios errors that may have slipped through.
+ */
 export const handleAPIError = (error) => {
-    console.error('API Error:', error);
-    
-    if (error.response) {
-        // Server responded with error status
-        return error.response.data?.message || 'An error occurred';
-    } else if (error.request) {
-        // Request was made but no response received
-        return 'Network error. Please check your connection.';
-    } else {
-        // Something else happened
-        return error.message || 'An unexpected error occurred';
-    }
-};
-
-// ========================================
-// COMMENTS API
-// ========================================
-
-export const commentsAPI = {
-    // Get comments for a meme
-    getComments: async (memeId, options = {}) => {
-        try {
-            const response = await API.get(`/comments/memes/${memeId}/comments`, {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch comments' };
-        }
-    },
-
-    // Add comment to meme
-    addComment: async (memeId, commentData) => {
-        try {
-            const response = await API.post(`/comments/memes/${memeId}/comments`, commentData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to add comment' };
-        }
-    },
-
-    // Update comment
-    updateComment: async (commentId, commentData) => {
-        try {
-            const response = await API.put(`/comments/${commentId}`, commentData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update comment' };
-        }
-    },
-
-    // Delete comment
-    deleteComment: async (commentId) => {
-        try {
-            const response = await API.delete(`/comments/${commentId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to delete comment' };
-        }
-    },
-
-    // Toggle like on comment
-    toggleLikeComment: async (commentId) => {
-        try {
-            const response = await API.post(`/comments/${commentId}/like`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to toggle like' };
-        }
-    },
-
-    // Get replies for a comment
-    getReplies: async (commentId, options = {}) => {
-        try {
-            const response = await API.get(`/comments/${commentId}/replies`, {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch replies' };
-        }
-    },
-
-    // Report comment
-    reportComment: async (commentId, reportData) => {
-        try {
-            const response = await API.post(`/comments/${commentId}/report`, reportData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to report comment' };
-        }
-    },
-
-    // Get user's comments
-    getUserComments: async (userId, options = {}) => {
-        try {
-            const response = await API.get(`/comments/users/${userId}/comments`, {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user comments' };
-        }
-    }
-};
-
-// ========================================
-// GROUPS API
-// ========================================
-export const groupsAPI = {
-    // Get all groups
-    getGroups: async (options = {}) => {
-        try {
-            const response = await API.get('/groups', {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch groups' };
-        }
-    },
-
-    // Get trending groups
-    getTrending: async () => {
-        try {
-            const response = await API.get('/groups/trending');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch trending groups' };
-        }
-    },
-
-    // Get user's groups
-    getUserGroups: async () => {
-        try {
-            const response = await API.get('/groups/user/groups');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user groups' };
-        }
-    }
-};
-
-// ========================================
-// COLLABORATIONS API
-// ========================================
-export const collaborationsAPI = {
-    // Get all collaborations
-    getCollaborations: async (options = {}) => {
-        try {
-            const response = await API.get('/collaborations', {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch collaborations' };
-        }
-    },
-
-    // Get trending collaborations
-    getTrending: async () => {
-        try {
-            const response = await API.get('/collaborations/trending');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch trending collaborations' };
-        }
-    },
-
-    // Get user's collaborations
-    getUserCollaborations: async () => {
-        try {
-            const response = await API.get('/collaborations/user/collaborations');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user collaborations' };
-        }
-    },
-
-    // Get collaboration by ID
-    getCollaborationById: async (id) => {
-        try {
-            const response = await API.get(`/collaborations/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch collaboration' };
-        }
-    },
-
-    // Create new collaboration
-    createCollaboration: async (collaborationData) => {
-        try {
-            const response = await API.post('/collaborations', collaborationData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create collaboration' };
-        }
-    },
-
-    // Update collaboration
-    updateCollaboration: async (id, updates) => {
-        try {
-            const response = await API.put(`/collaborations/${id}`, updates);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update collaboration' };
-        }
-    },
-
-    // Join collaboration
-    joinCollaboration: async (id, message = '') => {
-        try {
-            const response = await API.post(`/collaborations/${id}/join`, { message });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to join collaboration' };
-        }
-    },
-
-    // Invite user to collaboration
-    inviteUser: async (id, username, role = 'contributor', message = '') => {
-        try {
-            const response = await API.post(`/collaborations/${id}/invite`, {
-                username,
-                role,
-                message
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to invite user' };
-        }
-    },
-
-    // Create new version
-    createVersion: async (id, versionData) => {
-        try {
-            const response = await API.post(`/collaborations/${id}/versions`, versionData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create version' };
-        }
-    },
-
-    // Fork collaboration
-    forkCollaboration: async (id, title) => {
-        try {
-            // Only send title if it's not empty (let backend generate default title)
-            const body = title && title.trim() ? { title: title.trim() } : {};
-            const response = await API.post(`/collaborations/${id}/fork`, body);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fork collaboration' };
-        }
-    },
-
-    // Add comment
-    addComment: async (id, commentData) => {
-        try {
-            const response = await API.post(`/collaborations/${id}/comments`, commentData);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to add comment' };
-        }
-    },
-
-    // Remove collaborator (admin only)
-    removeCollaborator: async (id, collaboratorId) => {
-        try {
-            const response = await API.delete(`/collaborations/${id}/collaborators/${collaboratorId}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to remove collaborator' };
-        }
-    },
-
-    // Update collaborator role (admin only)
-    updateCollaboratorRole: async (id, collaboratorId, role) => {
-        try {
-            const response = await API.put(`/collaborations/${id}/collaborators/${collaboratorId}/role`, { role });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to update collaborator role' };
-        }
-    },
-
-    // Accept collaboration invite
-    acceptInvite: async (id) => {
-        try {
-            const response = await API.post(`/collaborations/${id}/invites/accept`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to accept invite' };
-        }
-    },
-
-    // Decline collaboration invite
-    declineInvite: async (id) => {
-        try {
-            const response = await API.post(`/collaborations/${id}/invites/decline`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to decline invite' };
-        }
-    },
-
-    // Get user's pending invites
-    getPendingInvites: async () => {
-        try {
-            const response = await API.get('/collaborations/user/invites');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get pending invites' };
-        }
-    },
-
-    // Get meme remixes
-    getMemeRemixes: async (memeId) => {
-        try {
-            const response = await API.get(`/collaborations/meme/${memeId}/remixes`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch remixes' };
-        }
-    },
-
-    // Delete collaboration
-    deleteCollaboration: async (id) => {
-        try {
-            const response = await API.delete(`/collaborations/${id}`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to delete collaboration' };
-        }
-    },
-
-    // ========================================
-    // ADVANCED COLLABORATION FEATURES
-    // ========================================
-
-    // Get collaboration templates
-    getTemplates: async (category = null) => {
-        try {
-            const response = await API.get('/collaborations/templates', {
-                params: category ? { category } : {}
-            });
-            return response.data.templates || [];
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch templates' };
-        }
-    },
-
-    // Create collaboration from template
-    createFromTemplate: async (data) => {
-        try {
-            const response = await API.post('/collaborations/from-template', data);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to create from template' };
-        }
-    },
-
-    // Get collaboration insights
-    getInsights: async (id) => {
-        try {
-            const response = await API.get(`/collaborations/${id}/insights`);
-            return response.data.insights || null;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get insights' };
-        }
-    },
-
-    // Get collaboration activity feed
-    getActivity: async (id, limit = 20) => {
-        try {
-            const response = await API.get(`/collaborations/${id}/activity`, {
-                params: { limit }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get activity' };
-        }
-    },
-
-    // Get collaboration statistics
-    getStats: async (id) => {
-        try {
-            const response = await API.get(`/collaborations/${id}/stats`);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to get statistics' };
-        }
-    },
-
-    // Track user activity
-    trackActivity: async (id, action, details = {}) => {
-        try {
-            const response = await API.post(`/collaborations/${id}/track-activity`, {
-                action,
-                details
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to track activity' };
-        }
-    },
-
-    // Merge fork back to parent
-    mergeFork: async (parentId, forkId, mergeOptions = {}) => {
-        try {
-            const response = await API.post(`/collaborations/${parentId}/merge-fork`, {
-                forkId,
-                mergeOptions
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to merge fork' };
-        }
-    },
-
-    // Bulk operations on collaborations
-    bulkOperations: async (operation, collaborationIds, data = {}) => {
-        try {
-            const response = await API.post('/collaborations/bulk-operations', {
-                operation,
-                collaborationIds,
-                data
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to perform bulk operation' };
-        }
-    }
-};
-
-// ========================================
-// CHALLENGES API
-// ========================================
-export const challengesAPI = {
-    // Get all challenges
-    getChallenges: async (options = {}) => {
-        try {
-            const response = await API.get('/challenges', {
-                params: options
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch challenges' };
-        }
-    },
-
-    // Get trending challenges
-    getTrending: async () => {
-        try {
-            const response = await API.get('/challenges/trending');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch trending challenges' };
-        }
-    },
-
-    // Get user's challenges
-    getUserChallenges: async () => {
-        try {
-            const response = await API.get('/challenges/user/challenges');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { message: 'Failed to fetch user challenges' };
-        }
-    }
+    if (!error) return 'Unknown error';
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    if (error.response?.data?.message) return error.response.data.message;
+    if (error.request) return 'Network error. Please check your connection.';
+    return 'An unexpected error occurred';
 };
 
 export default API;

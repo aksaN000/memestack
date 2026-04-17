@@ -1,99 +1,42 @@
-import axios from 'axios';
+// ============================================================================
+// moderationAPI.js — compatibility re-export layer
+// ----------------------------------------------------------------------------
+// This file used to define its own axios instance and its own request/response
+// interceptors. It has been consolidated into `services/api.js`, which is now
+// the single source of truth for all API calls (one axios instance, one
+// interceptor chain, one error shape).
+//
+// This file exists only to keep existing imports working:
+//   import { submitReport } from '../services/moderationAPI';
+//   import { getReports, getModerationDashboard, ... } from '../services/moderationAPI';
+//
+// Prefer importing from `services/api.js` directly in new code.
+// ============================================================================
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import { moderationAPI } from './api';
 
-// Create axios instance with default config
-const moderationAPI = axios.create({
-    baseURL: `${API_URL}/moderation`,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
+export const submitReport = (reportData) => moderationAPI.submitReport(reportData);
 
-// Add auth token to requests
-moderationAPI.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-});
+export const getReports = (filters = {}) => moderationAPI.getReports(filters);
 
-// Handle response errors
-moderationAPI.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '/login';
-        }
-        return Promise.reject(error);
-    }
-);
+export const reviewReport = (reportId, action, reason) =>
+    moderationAPI.reviewReport(reportId, action, reason);
 
-// Public functions (require authentication)
-export const submitReport = async (reportData) => {
-    const response = await moderationAPI.post('/report', reportData);
-    return response.data;
-};
+export const dismissReport = (reportId, reason) =>
+    moderationAPI.dismissReport(reportId, reason);
 
-// Admin functions (require admin privileges)
-export const getReports = async (filters = {}) => {
-    const params = new URLSearchParams();
-    Object.keys(filters).forEach(key => {
-        if (filters[key]) params.append(key, filters[key]);
-    });
-    
-    const response = await moderationAPI.get(`/reports?${params}`);
-    return response.data;
-};
+// Legacy name kept for ModerationDashboard.js — prefer moderationAPI.getDashboard().
+export const getModerationDashboard = () => moderationAPI.getDashboard();
 
-export const reviewReport = async (reportId, action, reason) => {
-    const response = await moderationAPI.put(`/reports/${reportId}/review`, {
-        action,
-        reason
-    });
-    return response.data;
-};
+export const warnUser = (userId, reason, reportId) =>
+    moderationAPI.warnUser(userId, reason, reportId);
 
-export const dismissReport = async (reportId, reason) => {
-    const response = await moderationAPI.put(`/reports/${reportId}/dismiss`, {
-        reason
-    });
-    return response.data;
-};
+export const suspendUser = (userId, reason, days, reportId) =>
+    moderationAPI.suspendUser(userId, reason, days, reportId);
 
-export const getModerationDashboard = async () => {
-    const response = await moderationAPI.get('/dashboard');
-    return response.data;
-};
+export const banUser = (userId, reason, reportId) =>
+    moderationAPI.banUser(userId, reason, reportId);
 
-export const warnUser = async (userId, reason, reportId) => {
-    const response = await moderationAPI.post(`/users/${userId}/warn`, {
-        reason,
-        reportId
-    });
-    return response.data;
-};
+export const unbanUser = (userId) => moderationAPI.unbanUser(userId);
 
-export const suspendUser = async (userId, reason, days, reportId) => {
-    const response = await moderationAPI.post(`/users/${userId}/suspend`, {
-        reason,
-        days,
-        reportId
-    });
-    return response.data;
-};
-
-export const banUser = async (userId, reason, reportId) => {
-    const response = await moderationAPI.post(`/users/${userId}/ban`, {
-        reason,
-        reportId
-    });
-    return response.data;
-};
-
-export const unbanUser = async (userId) => {
-    const response = await moderationAPI.post(`/users/${userId}/unban`);
-    return response.data;
-};
+export default moderationAPI;

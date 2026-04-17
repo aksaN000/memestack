@@ -1,68 +1,73 @@
-import React, { useState, useRef } from 'react';
+// ============================================================================
+// BatchProcessor — run watermark/resize/compress/format ops on many images.
+// ----------------------------------------------------------------------------
+// Three numbered sections: pick files → configure operation → run & download.
+// Presets pre-populate sensible settings. Results grid shows per-file success
+// with preview/download actions. No backend calls — all client-side canvas.
+// ============================================================================
+
+import React, { useRef, useState } from 'react';
 import {
-    Box,
-    Card,
-    CardContent,
-    Typography,
-    Button,
-    Grid,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    TextField,
-    LinearProgress,
-    Alert,
-    Chip,
-    IconButton,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    List,
-    ListItem,
-    ListItemText,
-    ListItemIcon,
     Accordion,
-    AccordionSummary,
     AccordionDetails,
-    Switch,
-    FormControlLabel,
-    Slider,
-    Divider,
+    AccordionSummary,
+    Alert,
+    Box,
+    Button,
+    Chip,
     Container,
-    Paper,
-    Fade,
-    Zoom,
-    useTheme,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    FormControl,
+    FormControlLabel,
+    Grid,
+    IconButton,
+    InputLabel,
+    LinearProgress,
+    MenuItem,
+    Select,
+    Slider,
+    Stack,
+    Switch,
+    TextField,
+    Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
-    CloudUpload as UploadIcon,
-    DynamicFeed as BatchIcon,
-    Download as DownloadIcon,
-    Preview as PreviewIcon,
-    Delete as DeleteIcon,
     CheckCircle as SuccessIcon,
+    Clear as ClearIcon,
+    CloudUpload as UploadIcon,
+    Download as DownloadIcon,
+    DynamicFeed as BatchIcon,
     Error as ErrorIcon,
-    Image as ImageIcon,
-    Settings as SettingsIcon,
     ExpandMore as ExpandMoreIcon,
+    Image as ImageIcon,
     PlayArrow as StartIcon,
-    Clear as ClearIcon
+    Preview as PreviewIcon,
 } from '@mui/icons-material';
-import { useThemeMode } from '../contexts/ThemeContext';
+
 import {
+    BATCH_PRESETS,
     batchProcess,
     downloadBatchResults,
-    createBatchPreview,
     validateBatchImages,
-    BATCH_PRESETS
 } from '../utils/batchProcessor';
 import { WATERMARK_POSITIONS } from '../utils/watermark';
+import { PageHeader } from '../components/common';
+
+const hexToRgb = (hex) => {
+    const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return match
+        ? `${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}`
+        : '255, 255, 255';
+};
 
 const BatchProcessor = () => {
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode() || { mode: 'light' };
+    const fileInputRef = useRef(null);
+
     const [files, setFiles] = useState([]);
     const [operation, setOperation] = useState('watermark');
     const [preset, setPreset] = useState('');
@@ -70,12 +75,9 @@ const BatchProcessor = () => {
     const [progress, setProgress] = useState(0);
     const [results, setResults] = useState([]);
     const [errors, setErrors] = useState([]);
-    const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+    const [previewOpen, setPreviewOpen] = useState(false);
     const [selectedPreview, setSelectedPreview] = useState(null);
-    
-    const fileInputRef = useRef(null);
 
-    // Operation-specific settings
     const [watermarkSettings, setWatermarkSettings] = useState({
         type: 'text',
         text: 'MemeStack',
@@ -85,72 +87,100 @@ const BatchProcessor = () => {
         opacity: 0.8,
         backgroundColor: '#000000',
         backgroundOpacity: 0.3,
-        useBackground: true
+        useBackground: true,
     });
 
     const [resizeSettings, setResizeSettings] = useState({
         width: 1080,
         height: 1080,
         maintainAspectRatio: true,
-        quality: 0.9
+        quality: 0.9,
     });
 
     const [compressSettings, setCompressSettings] = useState({
         quality: 0.7,
         maxWidth: 1920,
-        maxHeight: 1080
+        maxHeight: 1080,
     });
 
     const [formatSettings, setFormatSettings] = useState({
         format: 'png',
-        quality: 0.9
+        quality: 0.9,
     });
 
+    // ---------------------------------------------------------------- helpers
+    const surfaceSx = {
+        p: { xs: 2, md: 3 },
+        mb: 3,
+        borderRadius: 3,
+        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+        background: theme.palette.background.paper,
+        boxShadow: theme.tokens?.shadow?.sm,
+    };
+
+    const sectionHeader = (num, label) => (
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
+            <Box
+                sx={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: theme.palette.brand?.accent,
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 900,
+                    border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                }}
+            >
+                {num}
+            </Box>
+            <Typography sx={{ fontWeight: 900, fontSize: '1.1rem' }}>{label}</Typography>
+        </Stack>
+    );
+
+    // ---------------------------------------------------------------- handlers
     const handleFileSelect = (event) => {
         const selectedFiles = Array.from(event.target.files);
         const validation = validateBatchImages(selectedFiles);
-        
         if (!validation.valid) {
             setErrors(validation.errors);
             return;
         }
-        
         setFiles(validation.validFiles);
         setErrors([]);
         setResults([]);
     };
 
-    const removeFile = (index) => {
-        setFiles(prev => prev.filter((_, i) => i !== index));
-    };
+    const removeFile = (index) =>
+        setFiles((prev) => prev.filter((_, i) => i !== index));
 
     const clearFiles = () => {
         setFiles([]);
         setResults([]);
         setErrors([]);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
+        if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     const applyPreset = (presetName) => {
         const presetConfig = BATCH_PRESETS[presetName];
         if (!presetConfig) return;
-
         setOperation(presetConfig.operation);
-        
         switch (presetConfig.operation) {
             case 'watermark':
-                setWatermarkSettings(prev => ({ ...prev, ...presetConfig.options }));
+                setWatermarkSettings((p) => ({ ...p, ...presetConfig.options }));
                 break;
             case 'resize':
-                setResizeSettings(prev => ({ ...prev, ...presetConfig.options }));
+                setResizeSettings((p) => ({ ...p, ...presetConfig.options }));
                 break;
             case 'compress':
-                setCompressSettings(prev => ({ ...prev, ...presetConfig.options }));
+                setCompressSettings((p) => ({ ...p, ...presetConfig.options }));
                 break;
             case 'format':
-                setFormatSettings(prev => ({ ...prev, ...presetConfig.options }));
+                setFormatSettings((p) => ({ ...p, ...presetConfig.options }));
+                break;
+            default:
                 break;
         }
     };
@@ -164,9 +194,9 @@ const BatchProcessor = () => {
                     position: watermarkSettings.position,
                     fontSize: watermarkSettings.fontSize,
                     color: `rgba(${hexToRgb(watermarkSettings.color)}, ${watermarkSettings.opacity})`,
-                    backgroundColor: watermarkSettings.useBackground 
+                    backgroundColor: watermarkSettings.useBackground
                         ? `rgba(${hexToRgb(watermarkSettings.backgroundColor)}, ${watermarkSettings.backgroundOpacity})`
-                        : 'transparent'
+                        : 'transparent',
                 };
             case 'resize':
                 return resizeSettings;
@@ -184,35 +214,25 @@ const BatchProcessor = () => {
             setErrors(['No files selected for processing']);
             return;
         }
-
         setProcessing(true);
         setProgress(0);
         setErrors([]);
-
         try {
             const options = getOperationOptions();
-            
             const batchResults = await batchProcess(
                 files,
                 operation,
                 options,
-                (current, total) => {
-                    setProgress((current / total) * 100);
-                },
-                (error) => {
-                    console.error('Batch processing error:', error);
-                }
+                (current, total) => setProgress((current / total) * 100),
+                (err) => console.error('Batch processing error:', err)
             );
-
             setResults(batchResults);
-            
-            const errorCount = batchResults.filter(r => !r.success).length;
+            const errorCount = batchResults.filter((r) => !r.success).length;
             if (errorCount > 0) {
-                setErrors([`${errorCount} file(s) failed to process. Check individual results.`]);
+                setErrors([`${errorCount} file(s) failed to process.`]);
             }
-
-        } catch (error) {
-            setErrors([error.message || 'Batch processing failed']);
+        } catch (e) {
+            setErrors([e.message || 'Batch processing failed']);
         } finally {
             setProcessing(false);
             setProgress(0);
@@ -222,193 +242,35 @@ const BatchProcessor = () => {
     const downloadResults = async () => {
         try {
             await downloadBatchResults(results, `batch_${operation}_${Date.now()}.zip`);
-        } catch (error) {
-            setErrors([error.message || 'Failed to download results']);
+        } catch (e) {
+            setErrors([e.message || 'Failed to download results']);
         }
     };
 
-    const openPreview = (result) => {
-        setSelectedPreview(result);
-        setPreviewDialogOpen(true);
-    };
+    const successfulResults = results.filter((r) => r.success);
 
-    const hexToRgb = (hex) => {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result 
-            ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}`
-            : '255, 255, 255';
-    };
-
-    const successfulResults = results.filter(r => r.success);
-
+    // ---------------------------------------------------------------- render
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="lg">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                                    backdropFilter: 'blur(50px)',
-                                    borderRadius: 3,
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.15)'
-                                        : '2px solid rgba(99, 102, 241, 0.15)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.25)'
-                                        : '3px solid rgba(99, 102, 241, 0.25)',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                        : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    '&::before': {
-                                        content: '""',
-                                        position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: '4px',
-                                        background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                    },
-                                }}
-                            >
-                                <Box sx={{ textAlign: 'center', width: '100%' }}>
-                                    <Box sx={{ textAlign: 'center' }}>
-                                        <Typography 
-                                            variant="h3" 
-                                            component="h1" 
-                                            sx={{
-                                                fontWeight: 800,
-                                                mb: 2,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                gap: 1.5
-                                            }}
-                                        >
-                                            <BatchIcon />
-                                            
-                                            {/* Lightning Bolt Emoji - Separate for Natural Colors */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    fontSize: 'inherit',
-                                                    filter: 'hue-rotate(0deg) saturate(1.2) brightness(1.1)',
-                                                    '&:hover': {
-                                                        transform: 'scale(1.15) rotate(-5deg)',
-                                                        transition: 'transform 0.3s ease',
-                                                    },
-                                                }}
-                                            >
-                                                ⚡
-                                            </Box>
-                                            
-                                            {/* Batch Image Processor Text with Gradient */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                                    backgroundClip: 'text',
-                                                    WebkitBackgroundClip: 'text',
-                                                    color: 'transparent',
-                                                    // Fallback for browsers that don't support background-clip
-                                                    '@supports not (-webkit-background-clip: text)': {
-                                                        background: 'none',
-                                                        color: currentThemeColors?.primary || '#6366f1',
-                                                    },
-                                                }}
-                                            >
-                                                Batch Image Processor
-                                            </Box>
-                                        </Typography>
-                                        <Typography 
-                                            variant="h6" 
-                                            sx={{ 
-                                                color: theme.palette.text.secondary,
-                                                fontWeight: 500,
-                                            }}
-                                        >
-                                            Process multiple images with powerful batch operations
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                            </Paper>
-                        </Zoom>
+        <Box>
+            <PageHeader
+                eyebrow="CREATOR TOOLS"
+                title="Batch image processor"
+                subtitle="Apply watermarks, resize, compress, or convert a pile of images in one go — all client-side."
+                icon={<BatchIcon />}
+            />
 
-                        {/* Main Content Card */}
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.8) 100%)',
-                                backdropFilter: 'blur(40px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.1)'
-                                    : '2px solid rgba(99, 102, 241, 0.1)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.15)'
-                                    : '3px solid rgba(99, 102, 241, 0.15)',
-                                borderRadius: '16px',
-                                boxShadow: mode === 'dark'
-                                    ? '0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                    : '0 12px 40px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                p: 4,
-                            }}
-                        >
-
-                    {/* File Upload */}
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            background: mode === 'dark' 
-                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                            backdropFilter: 'blur(30px)',
-                            borderRadius: 2,
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.08)'
-                                : '2px solid rgba(99, 102, 241, 0.08)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.12)'
-                                : '3px solid rgba(99, 102, 241, 0.12)',
-                            boxShadow: mode === 'dark'
-                                ? '0 8px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-                                : '0 8px 30px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
-                            p: 3,
-                            mb: 3
-                        }}
-                    >
-                        <Typography variant="h6" gutterBottom sx={{ 
-                            background: `linear-gradient(45deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                            backgroundClip: 'text',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            fontWeight: 'bold'
-                        }}>
-                            1. Select Images
-                        </Typography>
-                    
-                    <Box sx={{ mb: 2 }}>
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {/* Section 1 — Upload */}
+                <Box sx={surfaceSx}>
+                    {sectionHeader(1, 'Select images')}
+                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
                         <Button
-                            variant="outlined"
+                            variant="contained"
                             component="label"
                             startIcon={<UploadIcon />}
-                            sx={{ mr: 2 }}
+                            sx={{ fontWeight: 800 }}
                         >
-                            Choose Files
+                            Choose files
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -420,171 +282,115 @@ const BatchProcessor = () => {
                         </Button>
                         {files.length > 0 && (
                             <Button
-                                variant="text"
+                                variant="outlined"
+                                color="error"
                                 startIcon={<ClearIcon />}
                                 onClick={clearFiles}
-                                color="error"
                             >
-                                Clear All
+                                Clear all
                             </Button>
                         )}
-                    </Box>
-
+                    </Stack>
                     {files.length > 0 && (
-                        <Box>
-                            <Typography variant="body2" color="text.secondary" gutterBottom>
-                                {files.length} file(s) selected
+                        <>
+                            <Typography
+                                variant="caption"
+                                sx={{
+                                    color: theme.palette.text.secondary,
+                                    fontWeight: 700,
+                                    display: 'block',
+                                    mb: 1,
+                                }}
+                            >
+                                {files.length} file{files.length === 1 ? '' : 's'} selected
                             </Typography>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, maxHeight: 200, overflow: 'auto' }}>
+                            <Stack
+                                direction="row"
+                                spacing={1}
+                                flexWrap="wrap"
+                                useFlexGap
+                                sx={{ maxHeight: 200, overflow: 'auto' }}
+                            >
                                 {files.map((file, index) => (
                                     <Chip
-                                        key={index}
-                                        label={file.name}
-                                        onDelete={() => removeFile(index)}
-                                        size="small"
+                                        key={`${file.name}-${index}`}
                                         icon={<ImageIcon />}
-                                        sx={{
-                                            background: mode === 'dark'
-                                                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(139, 92, 246, 0.3) 100%)'
-                                                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.9) 0%, rgba(139, 92, 246, 0.9) 100%)',
-                                            backdropFilter: 'blur(20px)',
-                                            border: mode === 'dark'
-                                                ? '1px solid rgba(255, 255, 255, 0.15)'
-                                                : '1px solid rgba(255, 255, 255, 0.3)',
-                                            color: mode === 'dark' ? 'rgba(255, 255, 255, 0.9)' : 'white',
-                                            fontWeight: 600,
-                                            '&:hover': {
-                                                transform: 'translateY(-1px)',
-                                                boxShadow: mode === 'dark'
-                                                    ? '0 4px 15px rgba(99, 102, 241, 0.3)'
-                                                    : '0 4px 15px rgba(99, 102, 241, 0.4)',
-                                            },
-                                            transition: 'all 0.2s ease',
-                                        }}
+                                        label={file.name}
+                                        size="small"
+                                        onDelete={() => removeFile(index)}
+                                        sx={{ fontWeight: 700 }}
                                     />
                                 ))}
-                            </Box>
-                        </Box>
+                            </Stack>
+                        </>
                     )}
-                    </Paper>
+                </Box>
 
-                    {/* Operation Settings */}
-                    <Paper
-                        elevation={0}
+                {/* Section 2 — Configure */}
+                <Box sx={surfaceSx}>
+                    {sectionHeader(2, 'Configure operation')}
+
+                    <Typography
+                        variant="caption"
                         sx={{
-                            background: mode === 'dark' 
-                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                            backdropFilter: 'blur(30px)',
-                            borderRadius: 2,
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.08)'
-                                : '2px solid rgba(99, 102, 241, 0.08)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.12)'
-                                : '3px solid rgba(99, 102, 241, 0.12)',
-                            boxShadow: mode === 'dark'
-                                ? '0 8px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-                                : '0 8px 30px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
-                            p: 3,
-                            mb: 3
+                            color: theme.palette.text.secondary,
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                            display: 'block',
+                            mb: 1,
                         }}
                     >
-                        <Typography variant="h6" gutterBottom sx={{ 
-                            background: `linear-gradient(45deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                            backgroundClip: 'text',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            fontWeight: 'bold'
-                        }}>
-                            2. Configure Operation
-                        </Typography>
+                        Quick presets
+                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
+                        {Object.keys(BATCH_PRESETS).map((name) => (
+                            <Chip
+                                key={name}
+                                label={name.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                onClick={() => {
+                                    setPreset(name);
+                                    applyPreset(name);
+                                }}
+                                variant={preset === name ? 'filled' : 'outlined'}
+                                color={preset === name ? 'primary' : 'default'}
+                                sx={{ fontWeight: 700 }}
+                            />
+                        ))}
+                    </Stack>
 
-                    {/* Presets */}
-                    <Box sx={{ mb: 3 }}>
-                        <Typography variant="subtitle2" gutterBottom>
-                            Quick Presets
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                            {Object.keys(BATCH_PRESETS).map((presetName) => (
-                                <Chip
-                                    key={presetName}
-                                    label={presetName.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                    variant={preset === presetName ? 'filled' : 'outlined'}
-                                    onClick={() => {
-                                        setPreset(presetName);
-                                        applyPreset(presetName);
-                                    }}
-                                    size="small"
-                                    sx={{
-                                        background: preset === presetName 
-                                            ? (mode === 'dark'
-                                                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.4) 0%, rgba(139, 92, 246, 0.4) 100%)'
-                                                : 'linear-gradient(135deg, rgba(99, 102, 241, 0.9) 0%, rgba(139, 92, 246, 0.9) 100%)')
-                                            : (mode === 'dark'
-                                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%)'
-                                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.4) 100%)'),
-                                        backdropFilter: 'blur(15px)',
-                                        border: preset === presetName
-                                            ? (mode === 'dark'
-                                                ? '1px solid rgba(99, 102, 241, 0.3)'
-                                                : '1px solid rgba(99, 102, 241, 0.5)')
-                                            : (mode === 'dark'
-                                                ? '1px solid rgba(255, 255, 255, 0.1)'
-                                                : '1px solid rgba(99, 102, 241, 0.2)'),
-                                        color: preset === presetName
-                                            ? (mode === 'dark' ? 'rgba(255, 255, 255, 0.95)' : 'white')
-                                            : (mode === 'dark' ? 'rgba(255, 255, 255, 0.8)' : theme.palette.text.primary),
-                                        fontWeight: preset === presetName ? 600 : 500,
-                                        '&:hover': {
-                                            transform: 'translateY(-1px)',
-                                            boxShadow: mode === 'dark'
-                                                ? '0 4px 15px rgba(99, 102, 241, 0.2)'
-                                                : '0 4px 15px rgba(99, 102, 241, 0.3)',
-                                            background: preset === presetName 
-                                                ? (mode === 'dark'
-                                                    ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.5) 0%, rgba(139, 92, 246, 0.5) 100%)'
-                                                    : 'linear-gradient(135deg, rgba(99, 102, 241, 1) 0%, rgba(139, 92, 246, 1) 100%)')
-                                                : (mode === 'dark'
-                                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)'),
-                                        },
-                                        transition: 'all 0.2s ease',
-                                    }}
-                                />
-                            ))}
-                        </Box>
-                    </Box>
-
-                    {/* Operation Type */}
-                    <FormControl fullWidth sx={{ mb: 3 }}>
-                        <InputLabel>Operation Type</InputLabel>
+                    <FormControl fullWidth sx={{ mb: 2 }}>
+                        <InputLabel>Operation</InputLabel>
                         <Select
                             value={operation}
+                            label="Operation"
                             onChange={(e) => setOperation(e.target.value)}
-                            label="Operation Type"
                         >
-                            <MenuItem value="watermark">Add Watermark</MenuItem>
-                            <MenuItem value="resize">Resize Images</MenuItem>
-                            <MenuItem value="compress">Compress Images</MenuItem>
-                            <MenuItem value="format">Convert Format</MenuItem>
+                            <MenuItem value="watermark">Add watermark</MenuItem>
+                            <MenuItem value="resize">Resize images</MenuItem>
+                            <MenuItem value="compress">Compress images</MenuItem>
+                            <MenuItem value="format">Convert format</MenuItem>
                         </Select>
                     </FormControl>
 
-                    {/* Operation-specific settings */}
                     {operation === 'watermark' && (
-                        <Accordion>
+                        <Accordion defaultExpanded sx={{ '&:before': { display: 'none' } }}>
                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Typography variant="subtitle2">Watermark Settings</Typography>
+                                <Typography sx={{ fontWeight: 800 }}>Watermark settings</Typography>
                             </AccordionSummary>
                             <AccordionDetails>
                                 <Grid container spacing={2}>
                                     <Grid item xs={12} sm={6}>
                                         <TextField
                                             fullWidth
-                                            label="Watermark Text"
+                                            label="Watermark text"
                                             value={watermarkSettings.text}
-                                            onChange={(e) => setWatermarkSettings(prev => ({ ...prev, text: e.target.value }))}
+                                            onChange={(e) =>
+                                                setWatermarkSettings((p) => ({
+                                                    ...p,
+                                                    text: e.target.value,
+                                                }))
+                                            }
                                         />
                                     </Grid>
                                     <Grid item xs={12} sm={6}>
@@ -592,8 +398,13 @@ const BatchProcessor = () => {
                                             <InputLabel>Position</InputLabel>
                                             <Select
                                                 value={watermarkSettings.position}
-                                                onChange={(e) => setWatermarkSettings(prev => ({ ...prev, position: e.target.value }))}
                                                 label="Position"
+                                                onChange={(e) =>
+                                                    setWatermarkSettings((p) => ({
+                                                        ...p,
+                                                        position: e.target.value,
+                                                    }))
+                                                }
                                             >
                                                 {WATERMARK_POSITIONS.map((pos) => (
                                                     <MenuItem key={pos.value} value={pos.value}>
@@ -604,19 +415,33 @@ const BatchProcessor = () => {
                                         </FormControl>
                                     </Grid>
                                     <Grid item xs={6}>
-                                        <Typography gutterBottom>Font Size: {watermarkSettings.fontSize}px</Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                                            Font size: {watermarkSettings.fontSize}px
+                                        </Typography>
                                         <Slider
                                             value={watermarkSettings.fontSize}
-                                            onChange={(e, value) => setWatermarkSettings(prev => ({ ...prev, fontSize: value }))}
+                                            onChange={(_, v) =>
+                                                setWatermarkSettings((p) => ({
+                                                    ...p,
+                                                    fontSize: v,
+                                                }))
+                                            }
                                             min={10}
                                             max={72}
                                         />
                                     </Grid>
                                     <Grid item xs={6}>
-                                        <Typography gutterBottom>Opacity: {Math.round(watermarkSettings.opacity * 100)}%</Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                                            Opacity: {Math.round(watermarkSettings.opacity * 100)}%
+                                        </Typography>
                                         <Slider
                                             value={watermarkSettings.opacity}
-                                            onChange={(e, value) => setWatermarkSettings(prev => ({ ...prev, opacity: value }))}
+                                            onChange={(_, v) =>
+                                                setWatermarkSettings((p) => ({
+                                                    ...p,
+                                                    opacity: v,
+                                                }))
+                                            }
                                             min={0.1}
                                             max={1}
                                             step={0.1}
@@ -628,28 +453,38 @@ const BatchProcessor = () => {
                     )}
 
                     {operation === 'resize' && (
-                        <Accordion>
+                        <Accordion defaultExpanded sx={{ '&:before': { display: 'none' } }}>
                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Typography variant="subtitle2">Resize Settings</Typography>
+                                <Typography sx={{ fontWeight: 800 }}>Resize settings</Typography>
                             </AccordionSummary>
                             <AccordionDetails>
                                 <Grid container spacing={2}>
                                     <Grid item xs={6}>
                                         <TextField
                                             fullWidth
-                                            label="Width (px)"
                                             type="number"
+                                            label="Width (px)"
                                             value={resizeSettings.width}
-                                            onChange={(e) => setResizeSettings(prev => ({ ...prev, width: parseInt(e.target.value) || 0 }))}
+                                            onChange={(e) =>
+                                                setResizeSettings((p) => ({
+                                                    ...p,
+                                                    width: parseInt(e.target.value) || 0,
+                                                }))
+                                            }
                                         />
                                     </Grid>
                                     <Grid item xs={6}>
                                         <TextField
                                             fullWidth
-                                            label="Height (px)"
                                             type="number"
+                                            label="Height (px)"
                                             value={resizeSettings.height}
-                                            onChange={(e) => setResizeSettings(prev => ({ ...prev, height: parseInt(e.target.value) || 0 }))}
+                                            onChange={(e) =>
+                                                setResizeSettings((p) => ({
+                                                    ...p,
+                                                    height: parseInt(e.target.value) || 0,
+                                                }))
+                                            }
                                         />
                                     </Grid>
                                     <Grid item xs={12}>
@@ -657,10 +492,15 @@ const BatchProcessor = () => {
                                             control={
                                                 <Switch
                                                     checked={resizeSettings.maintainAspectRatio}
-                                                    onChange={(e) => setResizeSettings(prev => ({ ...prev, maintainAspectRatio: e.target.checked }))}
+                                                    onChange={(e) =>
+                                                        setResizeSettings((p) => ({
+                                                            ...p,
+                                                            maintainAspectRatio: e.target.checked,
+                                                        }))
+                                                    }
                                                 />
                                             }
-                                            label="Maintain Aspect Ratio"
+                                            label="Maintain aspect ratio"
                                         />
                                     </Grid>
                                 </Grid>
@@ -669,17 +509,21 @@ const BatchProcessor = () => {
                     )}
 
                     {operation === 'compress' && (
-                        <Accordion>
+                        <Accordion defaultExpanded sx={{ '&:before': { display: 'none' } }}>
                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Typography variant="subtitle2">Compression Settings</Typography>
+                                <Typography sx={{ fontWeight: 800 }}>Compression settings</Typography>
                             </AccordionSummary>
                             <AccordionDetails>
                                 <Grid container spacing={2}>
                                     <Grid item xs={12}>
-                                        <Typography gutterBottom>Quality: {Math.round(compressSettings.quality * 100)}%</Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                                            Quality: {Math.round(compressSettings.quality * 100)}%
+                                        </Typography>
                                         <Slider
                                             value={compressSettings.quality}
-                                            onChange={(e, value) => setCompressSettings(prev => ({ ...prev, quality: value }))}
+                                            onChange={(_, v) =>
+                                                setCompressSettings((p) => ({ ...p, quality: v }))
+                                            }
                                             min={0.1}
                                             max={1}
                                             step={0.1}
@@ -688,19 +532,29 @@ const BatchProcessor = () => {
                                     <Grid item xs={6}>
                                         <TextField
                                             fullWidth
-                                            label="Max Width (px)"
                                             type="number"
+                                            label="Max width (px)"
                                             value={compressSettings.maxWidth}
-                                            onChange={(e) => setCompressSettings(prev => ({ ...prev, maxWidth: parseInt(e.target.value) || null }))}
+                                            onChange={(e) =>
+                                                setCompressSettings((p) => ({
+                                                    ...p,
+                                                    maxWidth: parseInt(e.target.value) || null,
+                                                }))
+                                            }
                                         />
                                     </Grid>
                                     <Grid item xs={6}>
                                         <TextField
                                             fullWidth
-                                            label="Max Height (px)"
                                             type="number"
+                                            label="Max height (px)"
                                             value={compressSettings.maxHeight}
-                                            onChange={(e) => setCompressSettings(prev => ({ ...prev, maxHeight: parseInt(e.target.value) || null }))}
+                                            onChange={(e) =>
+                                                setCompressSettings((p) => ({
+                                                    ...p,
+                                                    maxHeight: parseInt(e.target.value) || null,
+                                                }))
+                                            }
                                         />
                                     </Grid>
                                 </Grid>
@@ -709,19 +563,24 @@ const BatchProcessor = () => {
                     )}
 
                     {operation === 'format' && (
-                        <Accordion>
+                        <Accordion defaultExpanded sx={{ '&:before': { display: 'none' } }}>
                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Typography variant="subtitle2">Format Settings</Typography>
+                                <Typography sx={{ fontWeight: 800 }}>Format settings</Typography>
                             </AccordionSummary>
                             <AccordionDetails>
                                 <Grid container spacing={2}>
                                     <Grid item xs={6}>
                                         <FormControl fullWidth>
-                                            <InputLabel>Output Format</InputLabel>
+                                            <InputLabel>Output format</InputLabel>
                                             <Select
                                                 value={formatSettings.format}
-                                                onChange={(e) => setFormatSettings(prev => ({ ...prev, format: e.target.value }))}
-                                                label="Output Format"
+                                                label="Output format"
+                                                onChange={(e) =>
+                                                    setFormatSettings((p) => ({
+                                                        ...p,
+                                                        format: e.target.value,
+                                                    }))
+                                                }
                                             >
                                                 <MenuItem value="png">PNG</MenuItem>
                                                 <MenuItem value="jpeg">JPEG</MenuItem>
@@ -730,10 +589,14 @@ const BatchProcessor = () => {
                                         </FormControl>
                                     </Grid>
                                     <Grid item xs={6}>
-                                        <Typography gutterBottom>Quality: {Math.round(formatSettings.quality * 100)}%</Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                                            Quality: {Math.round(formatSettings.quality * 100)}%
+                                        </Typography>
                                         <Slider
                                             value={formatSettings.quality}
-                                            onChange={(e, value) => setFormatSettings(prev => ({ ...prev, quality: value }))}
+                                            onChange={(_, v) =>
+                                                setFormatSettings((p) => ({ ...p, quality: v }))
+                                            }
                                             min={0.1}
                                             max={1}
                                             step={0.1}
@@ -743,246 +606,189 @@ const BatchProcessor = () => {
                             </AccordionDetails>
                         </Accordion>
                     )}
-                    </Paper>
+                </Box>
 
-                    {/* Process Button */}
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            background: mode === 'dark' 
-                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                            backdropFilter: 'blur(30px)',
-                            borderRadius: 2,
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.08)'
-                                : '2px solid rgba(99, 102, 241, 0.08)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.12)'
-                                : '3px solid rgba(99, 102, 241, 0.12)',
-                            boxShadow: mode === 'dark'
-                                ? '0 8px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-                                : '0 8px 30px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
-                            p: 3,
-                            mb: 3
-                        }}
-                    >
-                        <Typography variant="h6" gutterBottom sx={{ 
-                            background: `linear-gradient(45deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                            backgroundClip: 'text',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            fontWeight: 'bold'
-                        }}>
-                            3. Process Images
-                        </Typography>
-                    
+                {/* Section 3 — Process */}
+                <Box sx={surfaceSx}>
+                    {sectionHeader(3, 'Process')}
                     <Button
                         variant="contained"
                         size="large"
                         startIcon={<StartIcon />}
                         onClick={startBatchProcessing}
                         disabled={files.length === 0 || processing}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 2, fontWeight: 900 }}
                     >
-                        {processing ? 'Processing...' : `Process ${files.length} Image(s)`}
+                        {processing
+                            ? 'Processing…'
+                            : `Process ${files.length || 0} image${files.length === 1 ? '' : 's'}`}
                     </Button>
-
                     {processing && (
-                        <Box sx={{ width: '100%', mb: 2 }}>
-                            <LinearProgress variant="determinate" value={progress} />
-                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        <Box sx={{ mb: 2 }}>
+                            <LinearProgress
+                                variant="determinate"
+                                value={progress}
+                                sx={{ height: 10, borderRadius: 2 }}
+                            />
+                            <Typography
+                                variant="body2"
+                                sx={{ color: theme.palette.text.secondary, mt: 1 }}
+                            >
                                 {Math.round(progress)}% complete
                             </Typography>
                         </Box>
                     )}
-                    </Paper>
+                </Box>
 
-            {/* Errors */}
-            {errors.length > 0 && (
-                <Alert severity="error" sx={{ mb: 3 }}>
-                    <Typography variant="subtitle2">Errors:</Typography>
-                    <ul style={{ margin: 0 }}>
-                        {errors.map((error, index) => (
-                            <li key={index}>{error}</li>
-                        ))}
-                    </ul>
-                </Alert>
-            )}
+                {errors.length > 0 && (
+                    <Alert severity="error" sx={{ mb: 3 }}>
+                        <Typography sx={{ fontWeight: 800, mb: 0.5 }}>Errors</Typography>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {errors.map((err, i) => (
+                                <li key={i}>{err}</li>
+                            ))}
+                        </ul>
+                    </Alert>
+                )}
 
-                    {/* Results */}
-                    {results.length > 0 && (
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark' 
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                                backdropFilter: 'blur(30px)',
-                                borderRadius: 2,
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.08)'
-                                    : '2px solid rgba(99, 102, 241, 0.08)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.12)'
-                                    : '3px solid rgba(99, 102, 241, 0.12)',
-                                boxShadow: mode === 'dark'
-                                    ? '0 8px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-                                    : '0 8px 30px rgba(99, 102, 241, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
-                                p: 3
-                            }}
+                {results.length > 0 && (
+                    <Box sx={surfaceSx}>
+                        <Stack
+                            direction="row"
+                            justifyContent="space-between"
+                            alignItems="center"
+                            sx={{ mb: 2 }}
                         >
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                <Typography variant="h6" sx={{ 
-                                    background: `linear-gradient(45deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                    backgroundClip: 'text',
-                                    WebkitBackgroundClip: 'text',
-                                    WebkitTextFillColor: 'transparent',
-                                    fontWeight: 'bold'
-                                }}>
-                                    Results ({successfulResults.length}/{results.length} successful)
-                                </Typography>
-                                {successfulResults.length > 0 && (
-                                    <Button
-                                        variant="contained"
-                                        startIcon={<DownloadIcon />}
-                                        onClick={downloadResults}
-                                        sx={{
-                                            background: `linear-gradient(45deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                            border: 0,
-                                            borderRadius: '25px',
-                                            color: 'white',
-                                            '&:hover': {
-                                                background: `linear-gradient(45deg, ${currentThemeColors?.primaryHover || '#5855eb'}, ${currentThemeColors?.secondaryHover || '#7c3aed'})`,
-                                                transform: 'translateY(-2px)',
-                                                boxShadow: '0 8px 25px rgba(139, 92, 246, 0.3)'
-                                            },
-                                            transition: 'all 0.3s ease'
-                                        }}
-                                    >
-                                        Download All
-                                    </Button>
-                                )}
-                            </Box>
+                            <Typography sx={{ fontWeight: 900 }}>
+                                Results ({successfulResults.length}/{results.length} successful)
+                            </Typography>
+                            {successfulResults.length > 0 && (
+                                <Button
+                                    variant="contained"
+                                    startIcon={<DownloadIcon />}
+                                    onClick={downloadResults}
+                                    sx={{ fontWeight: 800 }}
+                                >
+                                    Download all
+                                </Button>
+                            )}
+                        </Stack>
 
                         <Grid container spacing={2}>
                             {results.map((result, index) => (
                                 <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
-                                    <Card 
-                                        variant="outlined"
+                                    <Box
                                         sx={{
-                                            background: mode === 'dark'
-                                                ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%)'
-                                                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.5) 100%)',
-                                            backdropFilter: 'blur(20px)',
-                                            border: mode === 'dark'
-                                                ? '1px solid rgba(255, 255, 255, 0.06)'
-                                                : '1px solid rgba(99, 102, 241, 0.06)',
-                                            borderTop: mode === 'dark'
-                                                ? '2px solid rgba(255, 255, 255, 0.08)'
-                                                : '2px solid rgba(99, 102, 241, 0.08)',
-                                            borderRadius: '12px',
-                                            boxShadow: mode === 'dark'
-                                                ? '0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
-                                                : '0 4px 20px rgba(99, 102, 241, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
-                                            transition: 'all 0.3s ease',
-                                            '&:hover': {
-                                                transform: 'translateY(-2px)',
-                                                boxShadow: mode === 'dark'
-                                                    ? '0 8px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                                    : '0 8px 30px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                            }
+                                            p: 2,
+                                            borderRadius: 2,
+                                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                            background: theme.palette.background.paper,
+                                            boxShadow: theme.tokens?.shadow?.sm,
+                                            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                                            '&:hover': result.success
+                                                ? {
+                                                      transform: 'translate(-2px, -2px)',
+                                                      boxShadow: theme.tokens?.shadow?.md,
+                                                  }
+                                                : {},
                                         }}
                                     >
-                                        <CardContent sx={{ p: 2 }}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                                {result.success ? (
-                                                    <SuccessIcon color="success" fontSize="small" />
-                                                ) : (
-                                                    <ErrorIcon color="error" fontSize="small" />
-                                                )}
-                                                <Typography variant="body2" noWrap>
-                                                    {result.original.name}
-                                                </Typography>
-                                            </Box>
-                                            
+                                        <Stack
+                                            direction="row"
+                                            spacing={1}
+                                            alignItems="center"
+                                            sx={{ mb: 1 }}
+                                        >
                                             {result.success ? (
-                                                <Box>
-                                                    <Typography variant="caption" color="text.secondary">
-                                                        {result.result.filename}
-                                                    </Typography>
-                                                    <Box sx={{ mt: 1 }}>
-                                                        <IconButton
-                                                            size="small"
-                                                            onClick={() => openPreview(result)}
-                                                        >
-                                                            <PreviewIcon />
-                                                        </IconButton>
-                                                    </Box>
-                                                </Box>
+                                                <SuccessIcon color="success" fontSize="small" />
                                             ) : (
-                                                <Typography variant="caption" color="error">
-                                                    {result.error}
-                                                </Typography>
+                                                <ErrorIcon color="error" fontSize="small" />
                                             )}
-                                        </CardContent>
-                                    </Card>
+                                            <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
+                                                {result.original.name}
+                                            </Typography>
+                                        </Stack>
+                                        {result.success ? (
+                                            <>
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{
+                                                        color: theme.palette.text.secondary,
+                                                        display: 'block',
+                                                    }}
+                                                    noWrap
+                                                >
+                                                    {result.result.filename}
+                                                </Typography>
+                                                <IconButton
+                                                    size="small"
+                                                    onClick={() => {
+                                                        setSelectedPreview(result);
+                                                        setPreviewOpen(true);
+                                                    }}
+                                                    sx={{ mt: 0.5 }}
+                                                >
+                                                    <PreviewIcon fontSize="small" />
+                                                </IconButton>
+                                            </>
+                                        ) : (
+                                            <Typography variant="caption" color="error">
+                                                {result.error}
+                                            </Typography>
+                                        )}
+                                    </Box>
                                 </Grid>
                             ))}
                         </Grid>
-                        </Paper>
-                    )}
-
-                    {/* Preview Dialog */}
-                    <Dialog
-                        open={previewDialogOpen}
-                        onClose={() => setPreviewDialogOpen(false)}
-                        maxWidth="md"
-                        fullWidth
-                    >
-                        {selectedPreview && (
-                            <>
-                                <DialogTitle>
-                                    Preview: {selectedPreview.result.filename}
-                                </DialogTitle>
-                                <DialogContent>
-                                    <Box
-                                        component="img"
-                                        src={selectedPreview.result.url}
-                                        alt="Preview"
-                                        sx={{
-                                            width: '100%',
-                                            height: 'auto',
-                                            maxHeight: '70vh',
-                                            objectFit: 'contain'
-                                        }}
-                                    />
-                                </DialogContent>
-                                <DialogActions>
-                                    <Button onClick={() => setPreviewDialogOpen(false)}>
-                                        Close
-                                    </Button>
-                                    <Button
-                                        variant="contained"
-                                        startIcon={<DownloadIcon />}
-                                        onClick={() => {
-                                            const url = selectedPreview.result.url;
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = selectedPreview.result.filename;
-                                            a.click();
-                                        }}
-                                    >
-                                        Download
-                                    </Button>
-                                </DialogActions>
-                            </>
-                        )}
-                    </Dialog>
-                        </Paper>
                     </Box>
-                </Fade>
+                )}
             </Container>
+
+            <Dialog
+                open={previewOpen}
+                onClose={() => setPreviewOpen(false)}
+                maxWidth="md"
+                fullWidth
+            >
+                {selectedPreview && (
+                    <>
+                        <DialogTitle sx={{ fontWeight: 900 }}>
+                            Preview: {selectedPreview.result.filename}
+                        </DialogTitle>
+                        <DialogContent>
+                            <Box
+                                component="img"
+                                src={selectedPreview.result.url}
+                                alt="Preview"
+                                sx={{
+                                    width: '100%',
+                                    height: 'auto',
+                                    maxHeight: '70vh',
+                                    objectFit: 'contain',
+                                    borderRadius: 2,
+                                    border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                }}
+                            />
+                        </DialogContent>
+                        <DialogActions sx={{ p: 2 }}>
+                            <Button onClick={() => setPreviewOpen(false)}>Close</Button>
+                            <Button
+                                variant="contained"
+                                startIcon={<DownloadIcon />}
+                                onClick={() => {
+                                    const a = document.createElement('a');
+                                    a.href = selectedPreview.result.url;
+                                    a.download = selectedPreview.result.filename;
+                                    a.click();
+                                }}
+                                sx={{ fontWeight: 800 }}
+                            >
+                                Download
+                            </Button>
+                        </DialogActions>
+                    </>
+                )}
+            </Dialog>
         </Box>
     );
 };

@@ -1,7 +1,19 @@
-// 🧭 Navigation Bar Component
-// Top navigation with authentication and menu items
+// ============================================================================
+// Navbar — global top navigation.
+// ----------------------------------------------------------------------------
+// Responsive, theme-aware app bar with:
+//   • Logo that routes home
+//   • Primary nav items (desktop)
+//   • Overflow menu for secondary items (desktop)
+//   • Create button as the primary CTA
+//   • User avatar → account menu / Login+Register when logged out
+//   • Theme toggle
+//   • Hamburger drawer on mobile
+//
+// All colors come from the MUI theme defined in contexts/ThemeContext.js.
+// ============================================================================
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
     AppBar,
     Toolbar,
@@ -12,17 +24,22 @@ import {
     MenuItem,
     Avatar,
     Box,
-    useTheme,
-    useMediaQuery,
+    Container,
     Drawer,
     List,
-    ListItem,
+    ListItemButton,
     ListItemIcon,
     ListItemText,
     Divider,
+    Stack,
+    Tooltip,
+    ListSubheader,
+    useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Menu as MenuIcon,
+    Close as CloseIcon,
     Home as HomeIcon,
     PhotoLibrary as GalleryIcon,
     Add as AddIcon,
@@ -34,510 +51,506 @@ import {
     Logout as LogoutIcon,
     Settings as SettingsIcon,
     EmojiEvents,
-    Groups,
+    Groups as GroupsIcon,
     Handshake,
     Brightness4,
     Brightness7,
-    Palette as PaletteIcon,
+    Analytics as AnalyticsIcon,
+    FolderOpen as FolderIcon,
+    ViewModule as TemplatesIcon,
+    BatchPrediction as BatchIcon,
+    Shield as ShieldIcon,
+    ExpandMore,
+    AutoAwesome,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useThemeMode } from '../../contexts/ThemeContext';
 import ThemeSettingsButton from '../common/ThemeSettingsButton';
 
+// --------------------------------------------------------------------------
+// Navigation configuration — single source of truth so desktop + mobile stay
+// in sync. Each item lists the minimum auth level it requires.
+// --------------------------------------------------------------------------
+const navConfig = {
+    primaryPublic: [
+        { label: 'Home',       path: '/',              icon: <HomeIcon /> },
+        { label: 'Gallery',    path: '/gallery',       icon: <GalleryIcon /> },
+        { label: 'Challenges', path: '/challenges',    icon: <EmojiEvents /> },
+        { label: 'Groups',     path: '/groups',        icon: <GroupsIcon /> },
+    ],
+    primaryAuth: [
+        { label: 'Feed',       path: '/feed',          icon: <AutoAwesome /> },
+        { label: 'Dashboard',  path: '/dashboard',     icon: <DashboardIcon /> },
+    ],
+    moreMenu: [
+        { label: 'Collaborations', path: '/collaborations', icon: <Handshake />,     requiresAuth: false },
+        { label: 'Browse Users',   path: '/browse-users',   icon: <PeopleIcon />,    requiresAuth: false },
+        { label: 'Templates',      path: '/templates',      icon: <TemplatesIcon />, requiresAuth: true },
+        { label: 'Folders',        path: '/folders',        icon: <FolderIcon />,    requiresAuth: true },
+        { label: 'Batch Process',  path: '/batch',          icon: <BatchIcon />,     requiresAuth: true },
+        { label: 'Analytics',      path: '/analytics',      icon: <AnalyticsIcon />, requiresAuth: true },
+    ],
+    admin: [
+        { label: 'Moderation', path: '/moderation', icon: <ShieldIcon /> },
+    ],
+};
+
 const Navbar = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-    
+    const isSmall  = useMediaQuery(theme.breakpoints.down('lg'));
+
     const { user, isAuthenticated, logout } = useAuth();
-    const { mode, toggleTheme, currentThemeColors } = useThemeMode();
-    
-    // Debug log to check currentThemeColors
-    console.log('Navbar currentThemeColors:', currentThemeColors);
-    
-    // Fallback colors if currentThemeColors is undefined
-    const themeColors = currentThemeColors || {
-        primary: '#6366f1',
-        secondary: '#8b5cf6',
-        accent: '#ec4899'
-    };
-    
-    // State for mobile menu and user menu
+    const { mode, toggleTheme } = useThemeMode();
+
     const [mobileOpen, setMobileOpen] = useState(false);
-    const [anchorEl, setAnchorEl] = useState(null);
+    const [userMenuAnchor, setUserMenuAnchor] = useState(null);
+    const [moreMenuAnchor, setMoreMenuAnchor] = useState(null);
 
-    // Handle mobile menu toggle
-    const handleDrawerToggle = () => {
-        setMobileOpen(!mobileOpen);
+    const closeAll = () => {
+        setUserMenuAnchor(null);
+        setMoreMenuAnchor(null);
+        setMobileOpen(false);
     };
 
-    // Handle user menu
-    const handleMenu = (event) => {
-        setAnchorEl(event.currentTarget);
+    const isActive = (path) =>
+        path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+
+    const handleNavigate = (path) => {
+        closeAll();
+        navigate(path);
     };
 
-    const handleCloseMenu = () => {
-        setAnchorEl(null);
-    };
-
-    // Handle logout
     const handleLogout = async () => {
-        handleCloseMenu();
+        closeAll();
         await logout();
         navigate('/');
     };
 
-    // Navigation items
-    const publicNavItems = [
-        { label: 'Home', path: '/', icon: <HomeIcon sx={{ color: themeColors?.primary || '#6366f1' }} /> },
-        { label: 'Gallery', path: '/gallery', icon: <GalleryIcon sx={{ color: themeColors?.secondary || '#8b5cf6' }} /> },
-        { label: 'Browse Users', path: '/browse-users', icon: <PeopleIcon sx={{ color: '#10b981' }} /> },
-        { label: 'Challenges', path: '/challenges', icon: <EmojiEvents sx={{ color: '#f59e0b' }} /> },
-        { label: 'Groups', path: '/groups', icon: <Groups sx={{ color: '#8b5cf6' }} /> },
-        { label: 'Collaborations', path: '/collaborations', icon: <Handshake sx={{ color: '#ec4899' }} /> },
-        { label: 'Theme Demo', path: '/theme-demo', icon: <PaletteIcon sx={{ color: themeColors?.accent || '#ec4899' }} /> },
-    ];
+    // Filter primary nav items for the desktop bar based on available width.
+    const desktopNavItems = useMemo(() => {
+        const items = [
+            ...navConfig.primaryPublic,
+            ...(isAuthenticated ? navConfig.primaryAuth : []),
+        ];
+        // On medium screens, drop the secondary-but-still-primary items to the
+        // "More" menu to avoid overflow.
+        return isSmall ? items.slice(0, 3) : items;
+    }, [isAuthenticated, isSmall]);
 
-    const privateNavItems = [
-        { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon sx={{ color: themeColors?.primary || '#6366f1' }} /> },
-        { label: 'Feed', path: '/feed', icon: <GalleryIcon sx={{ color: themeColors?.secondary || '#8b5cf6' }} /> },
-        { label: 'Create', path: '/create', icon: <AddIcon sx={{ color: '#10b981' }} /> },
-        { label: 'Templates', path: '/templates', icon: <DashboardIcon sx={{ color: '#f59e0b' }} /> },
-        { label: 'Batch Process', path: '/batch', icon: <DashboardIcon sx={{ color: '#8b5cf6' }} /> },
-        { label: 'Folders', path: '/folders', icon: <DashboardIcon sx={{ color: '#ec4899' }} /> },
-        { label: 'Analytics', path: '/analytics', icon: <DashboardIcon sx={{ color: '#6366f1' }} /> },
-    ];
+    const moreItems = useMemo(() => {
+        const base = navConfig.moreMenu.filter((it) => !it.requiresAuth || isAuthenticated);
+        const overflow = isSmall
+            ? [...navConfig.primaryPublic, ...(isAuthenticated ? navConfig.primaryAuth : [])].slice(3)
+            : [];
+        return [...overflow, ...base];
+    }, [isAuthenticated, isSmall]);
 
-    // Admin-only nav items
-    const adminNavItems = [
-        { label: 'Moderation', path: '/moderation', icon: <DashboardIcon sx={{ color: '#ef4444' }} /> },
-    ];
-
-    const authNavItems = [
-        { label: 'Login', path: '/login', icon: <LoginIcon sx={{ color: themeColors?.primary || '#6366f1' }} /> },
-        { label: 'Register', path: '/register', icon: <RegisterIcon sx={{ color: themeColors?.secondary || '#8b5cf6' }} /> },
-    ];
-
-    // Check if current path is active
-    const isActive = (path) => location.pathname === path;
-
-    // Desktop Navigation Items
-    const renderDesktopNav = () => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {publicNavItems.map((item) => (
-                <Button
-                    key={item.path}
-                    color="inherit"
-                    startIcon={item.icon}
-                    onClick={() => navigate(item.path)}
-                    sx={{
-                        fontWeight: isActive(item.path) ? 600 : 400,
-                        backgroundColor: isActive(item.path) 
-                            ? (mode === 'light' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.15)') 
-                            : 'transparent',
-                        color: mode === 'light' ? '#1f2937' : '#ffffff',
-                        borderRadius: 2,
-                        '&:hover': {
-                            backgroundColor: mode === 'light' 
-                                ? 'rgba(99, 102, 241, 0.08)' 
-                                : 'rgba(255,255,255,0.1)',
-                        },
-                    }}
-                >
-                    {item.label}
-                </Button>
-            ))}
-
-            {isAuthenticated && privateNavItems.map((item) => (
-                <Button
-                    key={item.path}
-                    color="inherit"
-                    startIcon={item.icon}
-                    onClick={() => navigate(item.path)}
-                    sx={{
-                        fontWeight: isActive(item.path) ? 600 : 400,
-                        backgroundColor: isActive(item.path) 
-                            ? (mode === 'light' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.15)') 
-                            : 'transparent',
-                        color: mode === 'light' ? '#1f2937' : '#ffffff',
-                        borderRadius: 2,
-                        '&:hover': {
-                            backgroundColor: mode === 'light' 
-                                ? 'rgba(99, 102, 241, 0.08)' 
-                                : 'rgba(255,255,255,0.1)',
-                        },
-                    }}
-                >
-                    {item.label}
-                </Button>
-            ))}
-
-            {isAuthenticated && user?.role === 'admin' && adminNavItems.map((item) => (
-                <Button
-                    key={item.path}
-                    color="inherit"
-                    startIcon={item.icon}
-                    onClick={() => navigate(item.path)}
-                    sx={{
-                        fontWeight: isActive(item.path) ? 600 : 400,
-                        backgroundColor: isActive(item.path) 
-                            ? (mode === 'light' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.15)') 
-                            : 'transparent',
-                        color: mode === 'light' ? '#1f2937' : '#ffffff',
-                        borderRadius: 2,
-                        '&:hover': {
-                            backgroundColor: mode === 'light' 
-                                ? 'rgba(99, 102, 241, 0.08)' 
-                                : 'rgba(255,255,255,0.1)',
-                        },
-                    }}
-                >
-                    {item.label}
-                </Button>
-            ))}
-        </Box>
-    );
-
-    // Mobile Navigation Drawer
-    const renderMobileNav = () => (
-        <Drawer
-            variant="temporary"
-            anchor="left"
-            open={mobileOpen}
-            onClose={handleDrawerToggle}
-            ModalProps={{
-                keepMounted: true, // Better open performance on mobile
-            }}
+    // ------------------------------------------------------------------ render
+    const renderLogo = () => (
+        <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            onClick={() => handleNavigate('/')}
             sx={{
-                '& .MuiDrawer-paper': {
-                    boxSizing: 'border-box',
-                    width: 280,
-                },
+                cursor: 'pointer',
+                userSelect: 'none',
+                mr: { xs: 0, md: 3 },
+                '&:hover .logo-mark': { transform: 'rotate(-6deg) scale(1.08)' },
             }}
         >
-            <Box sx={{ p: 2 }}>
-                <Typography variant="h6" component="div" sx={{ fontWeight: 700 }}>
-                    🎭 MemeStack
-                </Typography>
+            <Box
+                className="logo-mark"
+                sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 38,
+                    height: 38,
+                    borderRadius: 2,
+                    border: `2px solid ${theme.palette.brand?.border}`,
+                    background: theme.palette.brand?.gradient,
+                    color: '#fff',
+                    fontSize: 22,
+                    boxShadow: theme.tokens?.shadow?.sm,
+                    transition: 'transform 160ms ease',
+                }}
+            >
+                🎭
             </Box>
-            <Divider />
+            <Typography
+                component="span"
+                sx={{
+                    fontWeight: 900,
+                    fontSize: '1.25rem',
+                    letterSpacing: '-0.02em',
+                    background: theme.palette.brand?.gradient,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                }}
+            >
+                MemeStack
+            </Typography>
+        </Stack>
+    );
 
-            <List>
-                {publicNavItems.map((item) => (
-                    <ListItem
-                        button
-                        key={item.path}
-                        onClick={() => {
-                            navigate(item.path);
-                            handleDrawerToggle();
+    const renderDesktopNavButton = (item) => {
+        const active = isActive(item.path);
+        return (
+            <Button
+                key={item.path}
+                onClick={() => handleNavigate(item.path)}
+                startIcon={item.icon}
+                sx={{
+                    color: active ? theme.palette.primary.main : theme.palette.text.primary,
+                    backgroundColor: active ? theme.palette.brand?.gradientSoft : 'transparent',
+                    border: active
+                        ? `2px solid ${theme.palette.primary.main}`
+                        : '2px solid transparent',
+                    borderRadius: 2,
+                    px: 1.75,
+                    py: 0.75,
+                    fontWeight: active ? 800 : 700,
+                    fontSize: '0.875rem',
+                    boxShadow: 'none',
+                    '&:hover': {
+                        backgroundColor: theme.palette.brand?.gradientSoft,
+                        boxShadow: 'none',
+                    },
+                }}
+            >
+                {item.label}
+            </Button>
+        );
+    };
+
+    const renderDesktopNav = () => (
+        <Stack direction="row" spacing={0.75} sx={{ flexGrow: 1, alignItems: 'center' }}>
+            {desktopNavItems.map(renderDesktopNavButton)}
+            {moreItems.length > 0 && (
+                <>
+                    <Button
+                        onClick={(e) => setMoreMenuAnchor(e.currentTarget)}
+                        endIcon={<ExpandMore />}
+                        sx={{
+                            color: theme.palette.text.primary,
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                            border: '2px solid transparent',
+                            borderRadius: 2,
+                            px: 1.75,
+                            py: 0.75,
                         }}
-                        selected={isActive(item.path)}
                     >
-                        <ListItemIcon>{item.icon}</ListItemIcon>
-                        <ListItemText primary={item.label} />
-                    </ListItem>
-                ))}
+                        More
+                    </Button>
+                    <Menu
+                        anchorEl={moreMenuAnchor}
+                        open={Boolean(moreMenuAnchor)}
+                        onClose={() => setMoreMenuAnchor(null)}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+                        PaperProps={{ sx: { mt: 1, minWidth: 220 } }}
+                    >
+                        {moreItems.map((it) => (
+                            <MenuItem key={it.path} onClick={() => handleNavigate(it.path)}>
+                                <ListItemIcon sx={{ color: theme.palette.primary.main }}>{it.icon}</ListItemIcon>
+                                <ListItemText primary={it.label} />
+                            </MenuItem>
+                        ))}
+                    </Menu>
+                </>
+            )}
+        </Stack>
+    );
 
+    const renderCreateCTA = () => (
+        <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => handleNavigate(isAuthenticated ? '/create' : '/login')}
+            sx={{
+                fontWeight: 800,
+                px: 2.5,
+                ml: 1,
+                whiteSpace: 'nowrap',
+            }}
+        >
+            Create
+        </Button>
+    );
+
+    const renderThemeToggle = () => (
+        <Tooltip title={`Switch to ${mode === 'light' ? 'dark' : 'light'} mode`}>
+            <IconButton onClick={toggleTheme} aria-label="toggle theme">
+                {mode === 'light'
+                    ? <Brightness4 sx={{ color: theme.palette.text.primary }} />
+                    : <Brightness7 sx={{ color: theme.palette.brand?.accent }} />}
+            </IconButton>
+        </Tooltip>
+    );
+
+    const renderAccount = () => {
+        if (!isAuthenticated) {
+            return (
+                <Stack direction="row" spacing={1} alignItems="center">
+                    <Button onClick={() => handleNavigate('/login')} sx={{ fontWeight: 700 }}>
+                        Log in
+                    </Button>
+                    <Button
+                        variant="contained"
+                        onClick={() => handleNavigate('/register')}
+                        sx={{ fontWeight: 800 }}
+                    >
+                        Sign up
+                    </Button>
+                </Stack>
+            );
+        }
+
+        return (
+            <>
+                <Tooltip title={user?.profile?.displayName || user?.username || 'Account'}>
+                    <IconButton
+                        onClick={(e) => setUserMenuAnchor(e.currentTarget)}
+                        aria-label="account menu"
+                    >
+                        <Avatar
+                            src={user?.profile?.avatar}
+                            alt={user?.profile?.displayName || user?.username}
+                            sx={{
+                                width: 36,
+                                height: 36,
+                                fontWeight: 800,
+                                border: `2px solid ${theme.palette.brand?.border}`,
+                            }}
+                        >
+                            {(user?.profile?.displayName || user?.username || '?')
+                                .charAt(0)
+                                .toUpperCase()}
+                        </Avatar>
+                    </IconButton>
+                </Tooltip>
+                <Menu
+                    anchorEl={userMenuAnchor}
+                    open={Boolean(userMenuAnchor)}
+                    onClose={() => setUserMenuAnchor(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={{ sx: { mt: 1, minWidth: 220 } }}
+                >
+                    <Box sx={{ px: 2, py: 1.5, borderBottom: `2px solid ${theme.palette.divider}` }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                            {user?.profile?.displayName || user?.username}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                            @{user?.username}
+                        </Typography>
+                    </Box>
+                    <MenuItem onClick={() => handleNavigate('/profile')}>
+                        <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
+                        <ListItemText primary="My profile" />
+                    </MenuItem>
+                    <MenuItem onClick={() => handleNavigate('/dashboard')}>
+                        <ListItemIcon><DashboardIcon fontSize="small" /></ListItemIcon>
+                        <ListItemText primary="Dashboard" />
+                    </MenuItem>
+                    <MenuItem onClick={() => handleNavigate('/settings')}>
+                        <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+                        <ListItemText primary="Settings" />
+                    </MenuItem>
+                    {user?.role === 'admin' && (
+                        <MenuItem onClick={() => handleNavigate('/moderation')}>
+                            <ListItemIcon sx={{ color: theme.palette.error.main }}>
+                                <ShieldIcon fontSize="small" />
+                            </ListItemIcon>
+                            <ListItemText primary="Moderation" />
+                        </MenuItem>
+                    )}
+                    <Divider sx={{ my: 0.5 }} />
+                    <MenuItem onClick={handleLogout}>
+                        <ListItemIcon sx={{ color: theme.palette.error.main }}>
+                            <LogoutIcon fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText primary="Log out" />
+                    </MenuItem>
+                </Menu>
+            </>
+        );
+    };
+
+    const renderMobileDrawer = () => (
+        <Drawer
+            anchor="left"
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            PaperProps={{ sx: { width: 300 } }}
+        >
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ p: 2 }}>
+                {renderLogo()}
+                <IconButton onClick={() => setMobileOpen(false)} aria-label="close navigation">
+                    <CloseIcon />
+                </IconButton>
+            </Stack>
+            <Divider />
+            <List dense>
+                <ListSubheader sx={{ bgcolor: 'transparent', fontWeight: 800, letterSpacing: '0.1em' }}>
+                    EXPLORE
+                </ListSubheader>
+                {navConfig.primaryPublic.map((item) => (
+                    <ListItemButton
+                        key={item.path}
+                        selected={isActive(item.path)}
+                        onClick={() => handleNavigate(item.path)}
+                    >
+                        <ListItemIcon sx={{ color: theme.palette.primary.main }}>{item.icon}</ListItemIcon>
+                        <ListItemText primary={item.label} />
+                    </ListItemButton>
+                ))}
                 {isAuthenticated && (
                     <>
                         <Divider sx={{ my: 1 }} />
-                        {privateNavItems.map((item) => (
-                            <ListItem
-                                button
+                        <ListSubheader sx={{ bgcolor: 'transparent', fontWeight: 800, letterSpacing: '0.1em' }}>
+                            YOUR STACK
+                        </ListSubheader>
+                        {navConfig.primaryAuth.map((item) => (
+                            <ListItemButton
                                 key={item.path}
-                                onClick={() => {
-                                    navigate(item.path);
-                                    handleDrawerToggle();
-                                }}
                                 selected={isActive(item.path)}
+                                onClick={() => handleNavigate(item.path)}
                             >
-                                <ListItemIcon>{item.icon}</ListItemIcon>
+                                <ListItemIcon sx={{ color: theme.palette.primary.main }}>{item.icon}</ListItemIcon>
                                 <ListItemText primary={item.label} />
-                            </ListItem>
+                            </ListItemButton>
                         ))}
-                        
-                        {user?.role === 'admin' && adminNavItems.map((item) => (
-                            <ListItem
-                                button
+                        {navConfig.moreMenu.filter((it) => it.requiresAuth).map((item) => (
+                            <ListItemButton
                                 key={item.path}
-                                onClick={() => {
-                                    navigate(item.path);
-                                    handleDrawerToggle();
-                                }}
                                 selected={isActive(item.path)}
+                                onClick={() => handleNavigate(item.path)}
                             >
-                                <ListItemIcon>{item.icon}</ListItemIcon>
+                                <ListItemIcon sx={{ color: theme.palette.primary.main }}>{item.icon}</ListItemIcon>
                                 <ListItemText primary={item.label} />
-                            </ListItem>
+                            </ListItemButton>
+                        ))}
+                        {user?.role === 'admin' && navConfig.admin.map((item) => (
+                            <ListItemButton
+                                key={item.path}
+                                selected={isActive(item.path)}
+                                onClick={() => handleNavigate(item.path)}
+                            >
+                                <ListItemIcon sx={{ color: theme.palette.error.main }}>{item.icon}</ListItemIcon>
+                                <ListItemText primary={item.label} />
+                            </ListItemButton>
                         ))}
                     </>
                 )}
 
                 <Divider sx={{ my: 1 }} />
+                <ListSubheader sx={{ bgcolor: 'transparent', fontWeight: 800, letterSpacing: '0.1em' }}>
+                    DISCOVER
+                </ListSubheader>
+                {navConfig.moreMenu.filter((it) => !it.requiresAuth).map((item) => (
+                    <ListItemButton
+                        key={item.path}
+                        selected={isActive(item.path)}
+                        onClick={() => handleNavigate(item.path)}
+                    >
+                        <ListItemIcon sx={{ color: theme.palette.primary.main }}>{item.icon}</ListItemIcon>
+                        <ListItemText primary={item.label} />
+                    </ListItemButton>
+                ))}
 
+                <Divider sx={{ my: 1 }} />
                 {isAuthenticated ? (
                     <>
-                        <ListItem
-                            button
-                            onClick={() => {
-                                navigate('/profile');
-                                handleDrawerToggle();
-                            }}
-                            selected={isActive('/profile')}
-                        >
-                            <ListItemIcon><PersonIcon sx={{ color: themeColors?.primary || '#6366f1' }} /></ListItemIcon>
+                        <ListItemButton onClick={() => handleNavigate('/profile')}>
+                            <ListItemIcon sx={{ color: theme.palette.primary.main }}><PersonIcon /></ListItemIcon>
                             <ListItemText primary="Profile" />
-                        </ListItem>
-                        <ListItem
-                            button
-                            onClick={() => {
-                                navigate('/settings');
-                                handleDrawerToggle();
-                            }}
-                            selected={isActive('/settings')}
-                        >
-                            <ListItemIcon><SettingsIcon sx={{ color: '#6366f1' }} /></ListItemIcon>
+                        </ListItemButton>
+                        <ListItemButton onClick={() => handleNavigate('/settings')}>
+                            <ListItemIcon sx={{ color: theme.palette.primary.main }}><SettingsIcon /></ListItemIcon>
                             <ListItemText primary="Settings" />
-                        </ListItem>
-                        <ListItem button onClick={handleLogout}>
-                            <ListItemIcon><LogoutIcon sx={{ color: '#ef4444' }} /></ListItemIcon>
-                            <ListItemText primary="Logout" />
-                        </ListItem>
+                        </ListItemButton>
+                        <ListItemButton onClick={handleLogout}>
+                            <ListItemIcon sx={{ color: theme.palette.error.main }}><LogoutIcon /></ListItemIcon>
+                            <ListItemText primary="Log out" />
+                        </ListItemButton>
                     </>
                 ) : (
-                    authNavItems.map((item) => (
-                        <ListItem
-                            button
-                            key={item.path}
-                            onClick={() => {
-                                navigate(item.path);
-                                handleDrawerToggle();
-                            }}
-                            selected={isActive(item.path)}
-                        >
-                            <ListItemIcon>{item.icon}</ListItemIcon>
-                            <ListItemText primary={item.label} />
-                        </ListItem>
-                    ))
+                    <>
+                        <ListItemButton onClick={() => handleNavigate('/login')}>
+                            <ListItemIcon sx={{ color: theme.palette.primary.main }}><LoginIcon /></ListItemIcon>
+                            <ListItemText primary="Log in" />
+                        </ListItemButton>
+                        <ListItemButton onClick={() => handleNavigate('/register')}>
+                            <ListItemIcon sx={{ color: theme.palette.primary.main }}><RegisterIcon /></ListItemIcon>
+                            <ListItemText primary="Sign up" />
+                        </ListItemButton>
+                    </>
                 )}
-                
-                {/* Theme Toggle in Mobile Menu */}
-                <Divider sx={{ my: 1 }} />
-                <ListItem 
-                    button 
-                    onClick={toggleTheme}
-                >
-                    <ListItemIcon>
-                        {mode === 'dark' ? <Brightness7 sx={{ color: '#f59e0b' }} /> : <Brightness4 sx={{ color: '#6366f1' }} />}
+                <ListItemButton onClick={toggleTheme}>
+                    <ListItemIcon sx={{ color: theme.palette.brand?.accent || theme.palette.primary.main }}>
+                        {mode === 'light' ? <Brightness4 /> : <Brightness7 />}
                     </ListItemIcon>
-                    <ListItemText primary={`${mode === 'light' ? 'Dark' : 'Light'} Mode`} />
-                </ListItem>
+                    <ListItemText primary={`${mode === 'light' ? 'Dark' : 'Light'} mode`} />
+                </ListItemButton>
             </List>
         </Drawer>
     );
 
     return (
         <>
-            <AppBar 
-                position="sticky" 
-                elevation={0}
-                sx={{ 
-                    background: mode === 'light' 
-                        ? `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)`
-                        : 'linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%)',
-                    backdropFilter: 'blur(20px)',
-                    borderBottom: mode === 'light' ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.1)',
-                    boxShadow: mode === 'light' 
-                        ? '0 4px 20px rgba(0, 0, 0, 0.1)'
-                        : '0 8px 32px rgba(0, 0, 0, 0.5)',
-                    '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: mode === 'light' 
-                            ? 'linear-gradient(45deg, rgba(99,102,241,0.03) 0%, transparent 50%, rgba(139,92,246,0.03) 100%)'
-                            : 'linear-gradient(45deg, rgba(255,255,255,0.05) 0%, transparent 50%, rgba(255,255,255,0.05) 100%)',
-                        backgroundSize: '200% 200%',
-                        animation: 'shimmer 3s ease-in-out infinite',
-                        pointerEvents: 'none',
-                    },
-                    '@keyframes shimmer': {
-                        '0%': { backgroundPosition: '200% 200%' },
-                        '100%': { backgroundPosition: '-200% -200%' },
-                    },
-                }}
-            >
-                <Toolbar>
-                    {/* Mobile menu button */}
-                    {isMobile && (
-                        <IconButton
-                            color="inherit"
-                            aria-label="open drawer"
-                            edge="start"
-                            onClick={handleDrawerToggle}
-                            sx={{ mr: 2 }}
-                        >
-                            <MenuIcon />
-                        </IconButton>
-                    )}
+            <AppBar position="sticky" color="default">
+                <Container maxWidth="xl" disableGutters>
+                    <Toolbar sx={{ gap: 1 }}>
+                        {isMobile && (
+                            <IconButton
+                                aria-label="open navigation"
+                                onClick={() => setMobileOpen(true)}
+                                edge="start"
+                                sx={{ mr: 0.5 }}
+                            >
+                                <MenuIcon />
+                            </IconButton>
+                        )}
 
-                    {/* Logo */}
-                    <Typography 
-                        variant="h6" 
-                        component="div" 
-                        sx={{ 
-                            flexGrow: isMobile ? 1 : 0,
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                            mr: 4,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 0.5,
-                            '&:hover': {
-                                transform: 'scale(1.05)',
-                                transition: 'transform 0.2s ease-in-out',
-                                filter: 'drop-shadow(0 0 8px rgba(99, 102, 241, 0.5))',
-                            },
-                        }}
-                        onClick={() => navigate('/')}
-                    >
-                        <Box
-                            component="span"
-                            sx={{
-                                fontSize: '1.5rem',
-                                filter: 'hue-rotate(0deg) saturate(1.5) brightness(1.2)',
-                                textShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                            }}
-                        >
-                            🎭
-                        </Box>
-                        <Box
-                            component="span"
-                            sx={{
-                                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 30%, #ec4899 60%, #f59e0b 100%)',
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                backgroundClip: 'text',
-                                backgroundSize: '200% 200%',
-                                animation: 'logoGradient 3s ease infinite',
-                                // Fallback for browsers that don't support background-clip
-                                '@supports not (-webkit-background-clip: text)': {
-                                    background: 'none',
-                                    WebkitTextFillColor: '#6366f1',
-                                    color: '#6366f1',
-                                },
-                                '&:hover': {
-                                    animationPlayState: 'paused',
-                                },
-                                '@keyframes logoGradient': {
-                                    '0%': { backgroundPosition: '0% 50%' },
-                                    '50%': { backgroundPosition: '100% 50%' },
-                                    '100%': { backgroundPosition: '0% 50%' },
-                                },
-                            }}
-                        >
-                            MemeStack
-                        </Box>
-                    </Typography>
+                        {renderLogo()}
 
-                    {/* Desktop Navigation */}
-                    {!isMobile && (
-                        <Box sx={{ flexGrow: 1 }}>
-                            {renderDesktopNav()}
-                        </Box>
-                    )}
+                        {!isMobile && renderDesktopNav()}
+                        {isMobile && <Box sx={{ flexGrow: 1 }} />}
 
-                    {/* Theme Settings Button */}
-                    <ThemeSettingsButton />
-
-                    {/* User Authentication Section */}
-                    {!isMobile && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {isAuthenticated ? (
-                                <>
-                                    <IconButton
-                                        size="large"
-                                        aria-label="account of current user"
-                                        aria-controls="menu-appbar"
-                                        aria-haspopup="true"
-                                        onClick={handleMenu}
-                                        color="inherit"
-                                    >
-                                        <Avatar 
-                                            sx={{ width: 32, height: 32 }}
-                                            src={user?.profile?.avatar}
-                                            alt={user?.profile?.displayName || user?.username}
-                                        >
-                                            {(user?.profile?.displayName || user?.username)?.charAt(0).toUpperCase()}
-                                        </Avatar>
-                                    </IconButton>
-                                    <Menu
-                                        id="menu-appbar"
-                                        anchorEl={anchorEl}
-                                        anchorOrigin={{
-                                            vertical: 'bottom',
-                                            horizontal: 'right',
-                                        }}
-                                        keepMounted
-                                        transformOrigin={{
-                                            vertical: 'top',
-                                            horizontal: 'right',
-                                        }}
-                                        open={Boolean(anchorEl)}
-                                        onClose={handleCloseMenu}
-                                    >
-                                        <MenuItem onClick={() => { navigate('/profile'); handleCloseMenu(); }}>
-                                            <PersonIcon sx={{ mr: 2, color: themeColors?.primary || '#6366f1' }} />
-                                            Profile
-                                        </MenuItem>
-                                        <MenuItem onClick={() => { navigate('/settings'); handleCloseMenu(); }}>
-                                            <SettingsIcon sx={{ mr: 2, color: '#6366f1' }} />
-                                            Settings
-                                        </MenuItem>
-                                        <MenuItem onClick={handleLogout}>
-                                            <LogoutIcon sx={{ mr: 2, color: '#ef4444' }} />
-                                            Logout
-                                        </MenuItem>
-                                    </Menu>
-                                </>
-                            ) : (
-                                <>
-                                    <Button 
-                                        color="inherit" 
-                                        onClick={() => navigate('/login')}
-                                        sx={{ fontWeight: 500 }}
-                                    >
-                                        Login
-                                    </Button>
-                                    <Button 
-                                        variant="outlined"
-                                        color="inherit"
-                                        onClick={() => navigate('/register')}
-                                        sx={{ 
-                                            fontWeight: 500,
-                                            borderColor: 'rgba(255,255,255,0.5)',
-                                            '&:hover': {
-                                                borderColor: 'white',
-                                                backgroundColor: 'rgba(255,255,255,0.1)',
-                                            },
-                                        }}
-                                    >
-                                        Register
-                                    </Button>
-                                </>
-                            )}
-                        </Box>
-                    )}
-                </Toolbar>
+                        {!isMobile && renderCreateCTA()}
+                        <ThemeSettingsButton />
+                        {renderThemeToggle()}
+                        {!isMobile && renderAccount()}
+                        {isMobile && isAuthenticated && (
+                            <Avatar
+                                src={user?.profile?.avatar}
+                                alt={user?.username}
+                                onClick={() => handleNavigate('/profile')}
+                                sx={{
+                                    width: 34,
+                                    height: 34,
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                    border: `2px solid ${theme.palette.brand?.border}`,
+                                }}
+                            >
+                                {(user?.username || '?').charAt(0).toUpperCase()}
+                            </Avatar>
+                        )}
+                    </Toolbar>
+                </Container>
             </AppBar>
 
-            {/* Mobile Navigation Drawer */}
-            {renderMobileNav()}
+            {renderMobileDrawer()}
         </>
     );
 };

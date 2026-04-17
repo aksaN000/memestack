@@ -1,532 +1,329 @@
-// 📊 Enhanced Dashboard Page Component
-// Modern user dashboard with comprehensive stats and quick actions
+// ============================================================================
+// Dashboard — logged-in home screen.
+// ----------------------------------------------------------------------------
+// Shows the user's real stats (pulled from their User record), their most
+// recent uploads, and three quick actions. Empty states render cleanly when
+// the user hasn't posted yet.
+//
+// Data sources:
+//   • user.stats.* — populated server-side on every login/update.
+//   • memeAPI.getUserMemes() — the logged-in user's own memes (any privacy).
+// ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    Container,
-    Typography,
     Box,
-    Card,
-    CardContent,
-    Grid,
     Button,
-    useTheme,
-    Paper,
+    Container,
+    Grid,
+    Stack,
+    Typography,
     Avatar,
     Chip,
-    LinearProgress,
-    Stack,
-    IconButton,
-    Fade,
-    Slide,
-    Zoom,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Add as AddIcon,
     PhotoLibrary as GalleryIcon,
-    Memory as MemoryIcon,
     Favorite as FavoriteIcon,
     Visibility as VisibilityIcon,
     Share as ShareIcon,
-    TrendingUp as TrendingIcon,
-    EmojiEvents as AchievementIcon,
+    Image as ImageIcon,
     Timeline as AnalyticsIcon,
-    Notifications as NotificationIcon,
-    Settings as SettingsIcon,
-    CloudUpload as UploadIcon,
+    Bolt as BoltIcon,
+    ArrowForward as ArrowIcon,
+    AutoAwesome as SparkleIcon,
+    FolderOpen as FolderIcon,
+    EmojiEvents as ChallengeIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
-import StatCard from '../components/common/StatCard';
-import ActionCard from '../components/common/ActionCard';
+import { memeAPI } from '../services/api';
+import {
+    PageHeader,
+    Section,
+    MemeCard,
+    SkeletonCard,
+    EmptyState,
+    StatCard,
+} from '../components/common';
 
 const Dashboard = () => {
-    const navigate = useNavigate();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode();
+    const navigate = useNavigate();
     const { user } = useAuth();
-    const [animationStep, setAnimationStep] = useState(0);
+
+    const [recentMemes, setRecentMemes] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(null);
 
     useEffect(() => {
-        const timer = setInterval(() => {
-            setAnimationStep(prev => (prev + 1) % 3);
-        }, 2000);
-        return () => clearInterval(timer);
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setLoadError(null);
+            try {
+                const resp = await memeAPI.getUserMemes({ limit: 6, sortBy: 'createdAt' });
+                if (cancelled) return;
+                // API may return either { memes: [...] } or { data: { memes: [...] } }
+                const memes = resp?.memes || resp?.data?.memes || resp?.data || [];
+                setRecentMemes(Array.isArray(memes) ? memes : []);
+            } catch (err) {
+                if (!cancelled) setLoadError(err?.message || 'Could not load your memes.');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
     }, []);
 
-    // Enhanced stats data
-    const userStats = [
-        {
-            icon: <MemoryIcon sx={{ fontSize: 40, color: '#6366f1' }} />,
-            title: 'Total Memes',
-            value: user?.stats?.totalMemes || '12',
-            change: '+3 this week',
-        },
-        {
-            icon: <FavoriteIcon sx={{ fontSize: 40, color: '#ef4444' }} />,
-            title: 'Total Likes',
-            value: user?.stats?.totalLikes || '1.2k',
-            change: '+127 this week',
-        },
-        {
-            icon: <VisibilityIcon sx={{ fontSize: 40, color: '#6366f1' }} />,
-            title: 'Total Views',
-            value: user?.stats?.totalViews || '15.7k',
-            change: '+2.1k this week',
-        },
-        {
-            icon: <ShareIcon sx={{ fontSize: 40, color: '#8b5cf6' }} />,
-            title: 'Shares',
-            value: user?.stats?.totalShares || '89',
-            change: '+12 this week',
-        },
-    ];
+    const stats = useMemo(() => {
+        const s = user?.stats || {};
+        return [
+            { key: 'memes',  title: 'Memes created', value: s.memesCreated ?? 0, icon: <ImageIcon sx={{ color: theme.palette.primary.main }} /> },
+            { key: 'likes',  title: 'Likes received', value: s.totalLikes ?? 0,  icon: <FavoriteIcon sx={{ color: theme.palette.error.main }} /> },
+            { key: 'views',  title: 'Total views',    value: s.totalViews ?? 0,  icon: <VisibilityIcon sx={{ color: theme.palette.info.main }} /> },
+            { key: 'shares', title: 'Shares',         value: s.totalShares ?? 0, icon: <ShareIcon sx={{ color: theme.palette.secondary.main }} /> },
+        ];
+    }, [user, theme]);
 
-    // Quick actions with enhanced styling
     const quickActions = [
         {
-            title: 'Create New Meme',
-            description: 'Use our AI-powered editor to create viral content',
-            icon: <AddIcon sx={{ fontSize: 60, color: '#10b981' }} />,
+            title: 'Create a meme',
+            description: 'Blank canvas or a template — same fast editor.',
+            icon: <AddIcon />,
+            tint: theme.palette.primary.main,
             action: () => navigate('/create'),
-            badge: 'Popular'
         },
         {
-            title: 'Browse Templates',
-            description: 'Explore thousands of trending meme templates',
-            icon: <GalleryIcon sx={{ fontSize: 60, color: '#f59e0b' }} />,
+            title: 'Browse templates',
+            description: 'Pick a template and go. Save favorites for later.',
+            icon: <GalleryIcon />,
+            tint: theme.palette.secondary.main,
             action: () => navigate('/templates'),
-            badge: 'New'
         },
         {
-            title: 'View Analytics',
-            description: 'Track your meme performance and engagement',
-            icon: <AnalyticsIcon sx={{ fontSize: 60, color: '#8b5cf6' }} />,
+            title: 'See your analytics',
+            description: 'Likes, views, and shares — broken down by meme.',
+            icon: <AnalyticsIcon />,
+            tint: theme.palette.brand?.accent || theme.palette.primary.main,
             action: () => navigate('/analytics'),
-            badge: 'Pro'
         },
     ];
 
+    const hasMemes = recentMemes.length > 0;
+
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-        }}>
-            <Container maxWidth="lg" sx={{ py: 4 }}>
-                {/* Enhanced Header Section */}
-                <Fade in={true} timeout={1000}>
-                    <Box sx={{ mb: 6 }}>
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                p: 4,
-                                background: theme.palette.mode === 'dark'
-                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                backdropFilter: 'blur(50px)',
-                                WebkitBackdropFilter: 'blur(50px)',
-                                border: theme.palette.mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.3)'
-                                    : '2px solid rgba(0, 0, 0, 0.15)',
-                                borderTop: theme.palette.mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.4)'
-                                    : '3px solid rgba(0, 0, 0, 0.2)',
-                                borderRadius: '24px',
-                                boxShadow: theme.palette.mode === 'dark'
-                                    ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                    : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                position: 'relative',
-                                overflow: 'hidden',
-                                transition: 'all 0.3s ease',
-                                '&:hover': {
-                                    background: theme.palette.mode === 'dark'
-                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                    border: theme.palette.mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.4)'
-                                        : '2px solid rgba(0, 0, 0, 0.25)',
-                                    borderTop: theme.palette.mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.5)'
-                                        : '3px solid rgba(0, 0, 0, 0.3)',
-                                    boxShadow: theme.palette.mode === 'dark'
-                                        ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                        : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                },
-                                '&::before': {
-                                    content: '""',
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    height: '4px',
-                                    background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                },
-                            }}
+        <Box>
+            <PageHeader
+                eyebrow="DASHBOARD"
+                title={`Welcome back${user?.profile?.displayName || user?.username ? `, ${user?.profile?.displayName || user?.username}` : ''} 👋`}
+                subtitle="Your recent activity, quick actions, and a nudge to create more."
+                icon={
+                    <Avatar
+                        src={user?.profile?.avatar}
+                        sx={{
+                            width: 48,
+                            height: 48,
+                            fontWeight: 900,
+                            background: theme.palette.brand?.gradient,
+                        }}
+                    >
+                        {(user?.profile?.displayName || user?.username || '?').charAt(0).toUpperCase()}
+                    </Avatar>
+                }
+                actions={
+                    <>
+                        <Button
+                            variant="outlined"
+                            startIcon={<FolderIcon />}
+                            onClick={() => navigate('/folders')}
                         >
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems="center">
-                                <Avatar
-                                    src={user?.profilePicture}
-                                    sx={{
-                                        width: 80,
-                                        height: 80,
-                                        background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#ec4899'} 100%)`,
-                                        fontSize: '2rem',
-                                        fontWeight: 700,
-                                        border: '4px solid rgba(255, 255, 255, 0.2)',
-                                        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-                                    }}
-                                >
-                                    {user?.username?.[0]?.toUpperCase() || 'U'}
-                                </Avatar>
-                                
-                                <Box sx={{ flex: 1, textAlign: 'center' }}>
-                                    <Typography 
-                                        variant="h3" 
-                                        component="h1" 
-                                        sx={{ 
-                                            fontWeight: 800,
-                                            mb: 1,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 1.5,
-                                            flexWrap: 'wrap',
-                                        }}
-                                    >
-                                        {/* Welcome Text with Gradient */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#ec4899'} 100%)`,
-                                                backgroundClip: 'text',
-                                                WebkitBackgroundClip: 'text',
-                                                color: 'transparent',
-                                                // Fallback for browsers that don't support background-clip
-                                                '@supports not (-webkit-background-clip: text)': {
-                                                    background: 'none',
-                                                    color: currentThemeColors?.primary || '#6366f1',
-                                                },
-                                            }}
-                                        >
-                                            Welcome back, {user?.username}!
-                                        </Box>
-                                        
-                                        {/* Waving Hand Emoji - Separate for Natural Colors */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                fontSize: 'inherit',
-                                                filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                                '&:hover': {
-                                                    transform: 'scale(1.1) rotate(15deg)',
-                                                    transition: 'transform 0.3s ease',
-                                                },
-                                            }}
-                                        >
-                                            👋
-                                        </Box>
-                                    </Typography>
-                                    <Typography 
-                                        variant="h6" 
-                                        color="text.secondary"
-                                        sx={{ mb: 2 }}
-                                    >
-                                        Ready to create your next viral masterpiece?
-                                    </Typography>
-                                    <Stack direction="row" spacing={1} justifyContent={{ xs: 'center', sm: 'flex-start' }}>
-                                        <Chip
-                                            icon={<TrendingIcon sx={{ color: 'white' }} />}
-                                            label="Trending Creator"
-                                            size="small"
-                                            sx={{
-                                                background: theme.palette.mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                border: theme.palette.mode === 'dark'
-                                                    ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                    : '1px solid rgba(0, 0, 0, 0.2)',
-                                                color: theme.palette.mode === 'dark' ? 'white' : 'black',
-                                                fontWeight: 700,
-                                                backdropFilter: 'blur(20px)',
-                                                WebkitBackdropFilter: 'blur(20px)',
-                                                boxShadow: theme.palette.mode === 'dark'
-                                                    ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                    : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                '& .MuiChip-icon': { color: theme.palette.mode === 'dark' ? 'white' : 'black' },
-                                            }}
-                                        />
-                                        <Chip
-                                            icon={<AchievementIcon sx={{ color: 'primary.main' }} />}
-                                            label={`Level ${user?.level || 5}`}
-                                            size="small"
-                                            variant="outlined"
-                                            sx={{ 
-                                                background: theme.palette.mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                border: theme.palette.mode === 'dark'
-                                                    ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                    : '1px solid rgba(0, 0, 0, 0.2)',
-                                                color: theme.palette.mode === 'dark' ? 'white' : 'black',
-                                                fontWeight: 700,
-                                                backdropFilter: 'blur(20px)',
-                                                WebkitBackdropFilter: 'blur(20px)',
-                                                boxShadow: theme.palette.mode === 'dark'
-                                                    ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                    : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                '& .MuiChip-icon': { color: theme.palette.mode === 'dark' ? 'white' : 'black' },
-                                            }}
-                                        />
-                                    </Stack>
-                                </Box>
+                            Folders
+                        </Button>
+                        <Button
+                            variant="contained"
+                            startIcon={<AddIcon />}
+                            onClick={() => navigate('/create')}
+                        >
+                            Create
+                        </Button>
+                    </>
+                }
+            />
 
-                                <Stack direction="row" spacing={1}>
-                                    <IconButton
-                                        onClick={() => navigate('/settings')}
-                                        sx={{
-                                            '&:hover': { background: 'rgba(99, 102, 241, 0.1)' }
-                                        }}
-                                    >
-                                        <SettingsIcon sx={{ color: '#6366f1', fontSize: 28 }} />
-                                    </IconButton>
-                                    <IconButton
-                                        sx={{
-                                            '&:hover': { background: 'rgba(236, 72, 153, 0.1)' }
-                                        }}
-                                    >
-                                        <NotificationIcon sx={{ color: '#ec4899', fontSize: 28 }} />
-                                    </IconButton>
-                                </Stack>
-                            </Stack>
-                        </Paper>
-                    </Box>
-                </Fade>
-
-                {/* Enhanced Stats Grid */}
-                <Grid container spacing={3} sx={{ mb: 6 }}>
-                    {userStats.map((stat, index) => (
-                        <Grid item xs={12} sm={6} md={3} key={index}>
-                            <Zoom in={true} timeout={1000 + index * 200}>
-                                <Card
-                                    sx={{
-                                        height: '200px',
-                                        background: theme.palette.mode === 'dark'
-                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                        backdropFilter: 'blur(50px)',
-                                        WebkitBackdropFilter: 'blur(50px)',
-                                        border: theme.palette.mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.3)'
-                                            : '2px solid rgba(0, 0, 0, 0.15)',
-                                        borderTop: theme.palette.mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.4)'
-                                            : '3px solid rgba(0, 0, 0, 0.2)',
-                                        borderRadius: '20px',
-                                        boxShadow: theme.palette.mode === 'dark'
-                                            ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                            : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                        overflow: 'hidden',
-                                        position: 'relative',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.3s ease',
-                                        '&:hover': {
-                                            transform: 'translateY(-8px)',
-                                            background: theme.palette.mode === 'dark'
-                                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                            border: theme.palette.mode === 'dark'
-                                                ? '2px solid rgba(255, 255, 255, 0.4)'
-                                                : '2px solid rgba(0, 0, 0, 0.25)',
-                                            borderTop: theme.palette.mode === 'dark'
-                                                ? '3px solid rgba(255, 255, 255, 0.5)'
-                                                : '3px solid rgba(0, 0, 0, 0.3)',
-                                            boxShadow: theme.palette.mode === 'dark'
-                                                ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                                : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                        },
-                                    }}
-                                >
-                                    <CardContent sx={{ p: 3, position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                                            <Box sx={{ mr: 2 }}>
-                                                {stat.icon}
-                                            </Box>
-                                            <Typography 
-                                                variant="h6" 
-                                                sx={{ 
-                                                    fontWeight: 600,
-                                                    color: theme.palette.text.primary
-                                                }}
-                                            >
-                                                {stat.title}
-                                            </Typography>
-                                        </Box>
-                                        
-                                        <Typography 
-                                            variant="h4" 
-                                            sx={{ 
-                                                fontWeight: 800, 
-                                                mb: 1,
-                                                color: theme.palette.text.primary
-                                            }}
-                                        >
-                                            {stat.value}
-                                        </Typography>
-                                        
-                                        <Typography 
-                                            variant="body2" 
-                                            sx={{ 
-                                                opacity: 0.7,
-                                                color: theme.palette.text.secondary,
-                                                mt: 'auto'
-                                            }}
-                                        >
-                                            {stat.change}
-                                        </Typography>
-                                    </CardContent>
-                                </Card>
-                            </Zoom>
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {/* Stats */}
+                <Grid container spacing={2.5}>
+                    {stats.map((s) => (
+                        <Grid key={s.key} item xs={6} md={3}>
+                            <StatCard
+                                variant="detailed"
+                                title={s.title}
+                                value={s.value}
+                                icon={s.icon}
+                            />
                         </Grid>
                     ))}
                 </Grid>
 
-                {/* Quick Actions Section */}
-                <Box sx={{ mb: 6 }}>
-                    <Typography 
-                        variant="h4" 
-                        component="h2" 
-                        sx={{ 
-                            fontWeight: 700, 
-                            mb: 4,
-                            textAlign: 'center',
-                            color: theme.palette.text.primary,
-                        }}
-                    >
-                        Quick Actions
-                    </Typography>
-                    
-                    <Grid container spacing={4}>
-                        {quickActions.map((action, index) => (
-                            <Grid item xs={12} md={4} key={index}>
-                                <Slide direction="up" in={true} timeout={1000 + index * 200}>
-                                    <Card
-                                        onClick={action.action}
+                {/* Recent memes */}
+                <Section
+                    title="Your recent memes"
+                    subtitle="The last six memes you uploaded — public or private."
+                    icon={<BoltIcon />}
+                    action={
+                        hasMemes && (
+                            <Button
+                                endIcon={<ArrowIcon />}
+                                onClick={() => navigate(`/users/${user?._id || user?.id}`)}
+                            >
+                                See all
+                            </Button>
+                        )
+                    }
+                >
+                    {loading ? (
+                        <Grid container spacing={2.5}>
+                            {Array.from({ length: 3 }).map((_, i) => (
+                                <Grid key={i} item xs={12} sm={6} md={4}>
+                                    <SkeletonCard />
+                                </Grid>
+                            ))}
+                        </Grid>
+                    ) : loadError ? (
+                        <EmptyState
+                            icon="⚠️"
+                            title="Couldn't load your memes"
+                            description={loadError}
+                            action={<Button variant="contained" onClick={() => window.location.reload()}>Retry</Button>}
+                        />
+                    ) : !hasMemes ? (
+                        <EmptyState
+                            icon="🎨"
+                            title="You haven't posted a meme yet"
+                            description="Drop your first one — you'll land in the gallery alongside everyone else."
+                            action={
+                                <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/create')}>
+                                    Create your first meme
+                                </Button>
+                            }
+                        />
+                    ) : (
+                        <Grid container spacing={2.5}>
+                            {recentMemes.slice(0, 6).map((meme) => (
+                                <Grid key={meme.id || meme._id} item xs={12} sm={6} md={4}>
+                                    <MemeCard meme={meme} />
+                                </Grid>
+                            ))}
+                        </Grid>
+                    )}
+                </Section>
+
+                {/* Quick actions */}
+                <Section
+                    title="Jump back in"
+                    subtitle="The three things most people open next."
+                    icon={<SparkleIcon />}
+                >
+                    <Grid container spacing={2.5}>
+                        {quickActions.map((qa) => (
+                            <Grid key={qa.title} item xs={12} md={4}>
+                                <Box
+                                    onClick={qa.action}
+                                    sx={{
+                                        cursor: 'pointer',
+                                        p: 3,
+                                        borderRadius: 3,
+                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                        background: theme.palette.background.paper,
+                                        boxShadow: theme.tokens?.shadow?.md,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 1.5,
+                                        transition: 'transform 160ms ease, box-shadow 160ms ease',
+                                        height: '100%',
+                                        '&:hover': {
+                                            transform: 'translate(-2px, -2px)',
+                                            boxShadow: theme.tokens?.shadow?.lg,
+                                        },
+                                    }}
+                                >
+                                    <Box
                                         sx={{
-                                            height: '320px',
-                                            background: theme.palette.mode === 'dark'
-                                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                            backdropFilter: 'blur(50px)',
-                                            WebkitBackdropFilter: 'blur(50px)',
-                                            border: theme.palette.mode === 'dark'
-                                                ? '2px solid rgba(255, 255, 255, 0.3)'
-                                                : '2px solid rgba(0, 0, 0, 0.15)',
-                                            borderTop: theme.palette.mode === 'dark'
-                                                ? '3px solid rgba(255, 255, 255, 0.4)'
-                                                : '3px solid rgba(0, 0, 0, 0.2)',
-                                            borderRadius: '24px',
-                                            boxShadow: theme.palette.mode === 'dark'
-                                                ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                            cursor: 'pointer',
-                                            position: 'relative',
-                                            overflow: 'hidden',
-                                            transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                                            '&:hover': {
-                                                transform: 'translateY(-12px)',
-                                                background: theme.palette.mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                                border: theme.palette.mode === 'dark'
-                                                    ? '2px solid rgba(255, 255, 255, 0.4)'
-                                                    : '2px solid rgba(0, 0, 0, 0.25)',
-                                                borderTop: theme.palette.mode === 'dark'
-                                                    ? '3px solid rgba(255, 255, 255, 0.5)'
-                                                    : '3px solid rgba(0, 0, 0, 0.3)',
-                                                boxShadow: theme.palette.mode === 'dark'
-                                                    ? '0 25px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                                    : '0 25px 80px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                            },
+                                            width: 48,
+                                            height: 48,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: 2,
+                                            border: `2px solid ${theme.palette.brand?.border}`,
+                                            background: qa.tint,
+                                            color: '#fff',
+                                            boxShadow: theme.tokens?.shadow?.sm,
+                                            '& svg': { fontSize: 26 },
                                         }}
                                     >
-                                        <CardContent sx={{ p: 4, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 2 }}>
-                                            <Box sx={{ position: 'absolute', top: 16, right: 16 }}>
-                                                <Chip
-                                                    label={action.badge}
-                                                    size="small"
-                                                    sx={{
-                                                        background: theme.palette.mode === 'dark'
-                                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                        border: theme.palette.mode === 'dark'
-                                                            ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                            : '1px solid rgba(0, 0, 0, 0.2)',
-                                                        color: theme.palette.mode === 'dark' ? 'white' : 'black',
-                                                        fontWeight: 700,
-                                                        backdropFilter: 'blur(20px)',
-                                                        WebkitBackdropFilter: 'blur(20px)',
-                                                        boxShadow: theme.palette.mode === 'dark'
-                                                            ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                            : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                        '& .MuiChip-label': {
-                                                            color: theme.palette.mode === 'dark' ? 'white' : 'black'
-                                                        }
-                                                    }}
-                                                />
-                                            </Box>
-                                            
-                                            <Box sx={{ mb: 3, textAlign: 'center' }}>
-                                                {action.icon}
-                                            </Box>
-                                            
-                                            <Typography 
-                                                variant="h5" 
-                                                sx={{ 
-                                                    fontWeight: 700, 
-                                                    mb: 2,
-                                                    color: theme.palette.text.primary
-                                                }}
-                                            >
-                                                {action.title}
-                                            </Typography>
-                                            
-                                            <Typography 
-                                                variant="body1" 
-                                                sx={{ 
-                                                    opacity: 0.8, 
-                                                    flex: 1,
-                                                    color: theme.palette.text.secondary
-                                                }}
-                                            >
-                                                {action.description}
-                                            </Typography>
-                                            
-                                            <Button
-                                                variant="contained"
-                                                sx={{
-                                                    mt: 2,
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                                    color: 'white',
-                                                    fontWeight: 600,
-                                                    borderRadius: '12px',
-                                                    textTransform: 'none',
-                                                    boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                                    '&:hover': {
-                                                        background: `linear-gradient(135deg, ${currentThemeColors?.primaryHover || '#5b5bf6'}, ${currentThemeColors?.secondaryHover || '#7c3aed'})`,
-                                                        boxShadow: `0 12px 40px ${currentThemeColors?.primary || '#6366f1'}60`,
-                                                    },
-                                                }}
-                                            >
-                                                Get Started
-                                            </Button>
-                                        </CardContent>
-                                    </Card>
-                                </Slide>
+                                        {qa.icon}
+                                    </Box>
+                                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                                        {qa.title}
+                                    </Typography>
+                                    <Typography sx={{ color: theme.palette.text.secondary }}>
+                                        {qa.description}
+                                    </Typography>
+                                    <Box sx={{ flex: 1 }} />
+                                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                                        <Typography sx={{ fontWeight: 700, color: theme.palette.primary.main }}>
+                                            Open
+                                        </Typography>
+                                        <ArrowIcon sx={{ fontSize: 18, color: theme.palette.primary.main }} />
+                                    </Stack>
+                                </Box>
                             </Grid>
                         ))}
                     </Grid>
-                </Box>
+                </Section>
+
+                {/* Discover strip */}
+                <Section
+                    title="Discover"
+                    subtitle="Explore what's active across the platform."
+                    icon={<ChallengeIcon />}
+                    dense
+                >
+                    <Grid container spacing={2}>
+                        {[
+                            { title: 'Active challenges', desc: 'Weekly themes, voting, leaderboards.', to: '/challenges' },
+                            { title: 'Groups',             desc: 'Find a meme crew that fits your humor.', to: '/groups' },
+                            { title: 'Following feed',     desc: 'Only memes from creators you follow.', to: '/feed' },
+                        ].map((d) => (
+                            <Grid key={d.title} item xs={12} sm={4}>
+                                <Box
+                                    onClick={() => navigate(d.to)}
+                                    sx={{
+                                        cursor: 'pointer',
+                                        p: 2.5,
+                                        borderRadius: 2,
+                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                        background: theme.palette.brand?.surfaceSubtle,
+                                        transition: 'transform 120ms ease, background 120ms ease',
+                                        '&:hover': {
+                                            transform: 'translate(-1px, -1px)',
+                                            background: theme.palette.background.paper,
+                                        },
+                                    }}
+                                >
+                                    <Typography sx={{ fontWeight: 800, mb: 0.5 }}>{d.title}</Typography>
+                                    <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
+                                        {d.desc}
+                                    </Typography>
+                                </Box>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Section>
             </Container>
         </Box>
     );

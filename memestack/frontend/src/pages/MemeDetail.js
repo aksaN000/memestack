@@ -1,19 +1,22 @@
-// 🔍 Meme Detail Page Component
-// View individual meme with details and interactions
+// ============================================================================
+// MemeDetail — single meme view.
+// ----------------------------------------------------------------------------
+// Two-column layout on desktop (image left, metadata + actions right),
+// stacked on mobile. Below the fold: comment thread. Supports like, share,
+// download, and — for non-creators — a report dialog that posts to the
+// moderation API.
+// ============================================================================
 
 import React, { useEffect, useState } from 'react';
 import {
+    Box,
     Container,
     Typography,
-    Box,
-    Card,
-    CardMedia,
-    CardContent,
-    CardActions,
-    Button,
-    Chip,
-    IconButton,
     Grid,
+    Stack,
+    Button,
+    IconButton,
+    Chip,
     Avatar,
     Dialog,
     DialogTitle,
@@ -26,8 +29,10 @@ import {
     MenuItem,
     Alert,
     Snackbar,
-    useTheme
+    Tooltip,
+    Divider,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Favorite as FavoriteIcon,
     FavoriteBorder as FavoriteBorderIcon,
@@ -35,121 +40,102 @@ import {
     Download as DownloadIcon,
     Visibility as ViewIcon,
     Report as ReportIcon,
-    ArrowBack as ArrowBackIcon
+    ArrowBack as ArrowBackIcon,
+    ChatBubbleOutline as CommentIcon,
+    Lock as LockIcon,
 } from '@mui/icons-material';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
 import { memeAPI } from '../services/api';
 import { submitReport } from '../services/moderationAPI';
-import LoadingSpinner from '../components/common/LoadingSpinner';
-import FollowButton from '../components/common/FollowButton';
+import {
+    LoadingSpinner,
+    ErrorState,
+    Section,
+    FollowButton,
+} from '../components/common';
 import CommentSection from '../components/comments/CommentSection';
+
+const REPORT_REASONS = [
+    'Inappropriate content',
+    'Spam',
+    'Harassment',
+    'Copyright violation',
+    'Hate speech',
+    'Violence',
+    'Misleading information',
+    'Other',
+];
 
 const MemeDetail = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { user, isAuthenticated } = useAuth();
     const theme = useTheme();
-    
+    const { user, isAuthenticated } = useAuth();
+
     const [meme, setMeme] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const [loadError, setLoadError] = useState('');
     const [liked, setLiked] = useState(false);
-    const [reportDialogOpen, setReportDialogOpen] = useState(false);
+
+    const [reportOpen, setReportOpen] = useState(false);
     const [reportReason, setReportReason] = useState('');
     const [reportDescription, setReportDescription] = useState('');
-    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-    const reportReasons = [
-        'Inappropriate content',
-        'Spam',
-        'Harassment',
-        'Copyright violation',
-        'Hate speech',
-        'Violence',
-        'Misleading information',
-        'Other'
-    ];
+    const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
     useEffect(() => {
-        fetchMeme();
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setLoadError('');
+            try {
+                if (!id || id === 'undefined' || id === 'null') {
+                    throw new Error('Invalid meme ID');
+                }
+                const resp = await memeAPI.getMemeById(id);
+                if (cancelled) return;
+                const data = resp?.data?.meme || resp?.data || resp?.meme;
+                if (!data) throw new Error('Meme not found');
+                setMeme(data);
+                setLiked(!!data.isLiked);
+            } catch (err) {
+                if (!cancelled) setLoadError(err?.message || 'Failed to load meme');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
     }, [id]);
 
-    const fetchMeme = async () => {
-        try {
-            setLoading(true);
-            setError('');
-            
-            // Validate ID parameter
-            if (!id || id === 'undefined' || id === 'null') {
-                console.error('Invalid meme ID:', id);
-                setError('Invalid meme ID');
-                setLoading(false);
-                return;
-            }
-            
-            console.log('Fetching meme with ID:', id);
-            
-            // Try to fetch real meme data from API
-            try {
-                const response = await memeAPI.getMemeById(id);
-                console.log('API response:', response);
-                console.log('Response success:', response.success);
-                console.log('Response data:', response.data);
-                console.log('Response data meme:', response.data?.meme);
-                
-                if (response.success && response.data) {
-                    // Handle both direct meme data and nested meme data
-                    const memeData = response.data.meme || response.data;
-                    console.log('Meme data:', memeData);
-                    setMeme(memeData);
-                    setLiked(memeData.isLiked || false);
-                    return;
-                } else {
-                    console.error('Response not successful or no data:', response);
-                    setError('Failed to load meme - invalid response');
-                }
-            } catch (apiError) {
-                console.error('Failed to fetch meme:', apiError);
-                setError('Failed to load meme');
-            }
-        } catch (error) {
-            console.error('Error fetching meme:', error);
-            setError('Failed to load meme');
-        } finally {
-            setLoading(false);
-        }
-    };
+    // ---------- actions -----------------------------------------------------
+    const notify = (message, severity = 'success') =>
+        setSnack({ open: true, message, severity });
 
     const handleLike = async () => {
         if (!isAuthenticated) {
-            setSnackbar({ open: true, message: 'Please log in to like memes', severity: 'warning' });
+            notify('Log in to like memes', 'warning');
             return;
         }
-
         try {
-            const response = await memeAPI.toggleLike(id);
-            if (response.success) {
-                setLiked(response.data.isLiked);
-                setMeme(prev => ({
+            const resp = await memeAPI.toggleLike(id);
+            if (resp?.success) {
+                setLiked(resp.data.isLiked);
+                setMeme((prev) => ({
                     ...prev,
-                    stats: {
-                        ...prev.stats,
-                        likesCount: response.data.likesCount
-                    }
+                    stats: { ...prev?.stats, likesCount: resp.data.likesCount },
                 }));
-                setSnackbar({ open: true, message: response.data.isLiked ? 'Liked!' : 'Unliked!', severity: 'success' });
             }
-        } catch (error) {
-            console.error('Error toggling like:', error);
-            setSnackbar({ open: true, message: 'Failed to toggle like', severity: 'error' });
+        } catch (err) {
+            notify('Could not update like', 'error');
         }
     };
 
     const handleDownload = async () => {
         try {
-            const response = await fetch(meme.imageUrl);
-            const blob = await response.blob();
+            const resp = await fetch(meme.imageUrl);
+            const blob = await resp.blob();
             const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -158,9 +144,8 @@ const MemeDetail = () => {
             link.click();
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
-        } catch (error) {
-            console.error('Error downloading meme:', error);
-            setSnackbar({ open: true, message: 'Failed to download meme', severity: 'error' });
+        } catch {
+            notify('Download failed', 'error');
         }
     };
 
@@ -170,271 +155,354 @@ const MemeDetail = () => {
                 await navigator.share({
                     title: meme.title,
                     text: meme.description,
-                    url: window.location.href
+                    url: window.location.href,
                 });
             } else {
                 await navigator.clipboard.writeText(window.location.href);
-                setSnackbar({ open: true, message: 'Link copied to clipboard!', severity: 'success' });
+                notify('Link copied to clipboard');
             }
-        } catch (error) {
-            console.error('Error sharing:', error);
+        } catch {
+            /* user cancelled or clipboard blocked */
         }
     };
 
     const handleReport = async () => {
         if (!isAuthenticated) {
-            setSnackbar({ open: true, message: 'Please login to report content', severity: 'warning' });
+            notify('Log in to report content', 'warning');
             return;
         }
-
         try {
             await submitReport({
                 contentType: 'meme',
                 contentId: id,
                 reason: reportReason,
-                description: reportDescription
+                description: reportDescription,
             });
-            setReportDialogOpen(false);
+            setReportOpen(false);
             setReportReason('');
             setReportDescription('');
-            setSnackbar({ open: true, message: 'Report submitted successfully', severity: 'success' });
-        } catch (error) {
-            console.error('Error submitting report:', error);
-            setSnackbar({ open: true, message: 'Failed to submit report', severity: 'error' });
+            notify('Report submitted — thanks for flagging.');
+        } catch {
+            notify('Failed to submit report', 'error');
         }
     };
 
-    if (loading) {
-        return <LoadingSpinner />;
-    }
+    // ---------- render ------------------------------------------------------
+    if (loading) return <LoadingSpinner fullHeight />;
 
-    if (error || !meme) {
+    if (loadError || !meme) {
         return (
-            <Container maxWidth="md" sx={{ py: 4 }}>
-                <Alert severity="error" sx={{ mb: 2 }}>
-                    {error || 'Meme not found'}
-                </Alert>
-                <Button 
-                    startIcon={<ArrowBackIcon />} 
-                    onClick={() => navigate(-1)}
-                    variant="outlined"
-                >
-                    Go Back
-                </Button>
+            <Container maxWidth="md" sx={{ py: 6 }}>
+                <ErrorState
+                    title="Couldn't load that meme"
+                    description={loadError || 'The meme may have been removed or set private.'}
+                    action={
+                        <Button
+                            variant="contained"
+                            startIcon={<ArrowBackIcon />}
+                            onClick={() => navigate('/memes')}
+                        >
+                            Back to gallery
+                        </Button>
+                    }
+                />
             </Container>
         );
     }
 
+    const creator = meme.creator || {};
+    const isOwner = isAuthenticated && (user?.id === creator.id || user?._id === creator._id);
+    const creatorId = creator._id || creator.id;
+
     return (
-        <Container maxWidth="md" sx={{ py: 4 }}>
-            {/* Back Button */}
-            <Button 
-                startIcon={<ArrowBackIcon />} 
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+            {/* Back */}
+            <Button
+                startIcon={<ArrowBackIcon />}
                 onClick={() => navigate(-1)}
-                sx={{ mb: 2 }}
+                sx={{ mb: 2, fontWeight: 700 }}
             >
-                Back to Gallery
+                Back
             </Button>
 
-            <Grid container spacing={3}>
-                {/* Meme Image and Details */}
-                <Grid item xs={12}>
-                    <Card sx={{
-                        background: theme.palette.mode === 'dark'
-                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                        backdropFilter: 'blur(50px)',
-                        WebkitBackdropFilter: 'blur(50px)',
-                        border: theme.palette.mode === 'dark'
-                            ? '2px solid rgba(255, 255, 255, 0.3)'
-                            : '2px solid rgba(0, 0, 0, 0.15)',
-                        borderTop: theme.palette.mode === 'dark'
-                            ? '3px solid rgba(255, 255, 255, 0.4)'
-                            : '3px solid rgba(0, 0, 0, 0.2)',
-                        borderRadius: '20px',
-                        boxShadow: theme.palette.mode === 'dark'
-                            ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                            : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                        transition: 'all 0.3s ease',
-                        '&:hover': {
-                            transform: 'translateY(-2px)',
-                            background: theme.palette.mode === 'dark'
-                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                            border: theme.palette.mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.4)'
-                                : '2px solid rgba(0, 0, 0, 0.25)',
-                            borderTop: theme.palette.mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.5)'
-                                : '3px solid rgba(0, 0, 0, 0.3)',
-                            boxShadow: theme.palette.mode === 'dark'
-                                ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                        },
-                    }}>
-                        <CardMedia
+            <Grid container spacing={4}>
+                {/* Image */}
+                <Grid item xs={12} md={7}>
+                    <Box
+                        sx={{
+                            borderRadius: 3,
+                            overflow: 'hidden',
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            background: theme.palette.brand?.surfaceSubtle,
+                            boxShadow: theme.tokens?.shadow?.lg,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            minHeight: 320,
+                            p: { xs: 1, md: 2 },
+                        }}
+                    >
+                        <Box
                             component="img"
-                            image={meme.imageUrl}
+                            src={meme.imageUrl}
                             alt={meme.title}
-                            sx={{ height: 'auto', maxHeight: 600, objectFit: 'contain' }}
+                            sx={{
+                                width: '100%',
+                                height: 'auto',
+                                maxHeight: 640,
+                                objectFit: 'contain',
+                                borderRadius: 2,
+                                display: 'block',
+                            }}
                         />
-                        <CardContent>
-                            <Typography variant="h4" component="h1" gutterBottom>
-                                {meme.title}
-                            </Typography>
-                            <Typography variant="body1" color="text.secondary" paragraph>
-                                {meme.description}
-                            </Typography>
-                            
-                            {/* Creator Info */}
-                            <Box display="flex" alignItems="center" gap={2} mb={2}>
-                                <Avatar 
-                                    src={meme.creator?.avatar} 
-                                    alt={meme.creator?.username}
-                                >
-                                    {meme.creator?.username?.charAt(0).toUpperCase()}
-                                </Avatar>
-                                <Box>
-                                    <Typography variant="subtitle1" fontWeight="bold">
-                                        {meme.creator?.profile?.displayName || meme.creator?.username}
-                                    </Typography>
-                                    {meme.creator?.profile?.displayName && (
-                                        <Typography variant="body2" color="text.secondary">
-                                            @{meme.creator?.username}
-                                        </Typography>
-                                    )}
-                                    <Typography variant="caption" color="text.secondary">
-                                        {new Date(meme.createdAt).toLocaleDateString()}
-                                    </Typography>
-                                </Box>
-                                {isAuthenticated && user?.id !== meme.creator?.id && (
-                                    <FollowButton userId={meme.creator?.id} />
-                                )}
-                            </Box>
-
-                            {/* Template Attribution */}
-                            {meme.templateInfo && (
-                                <Box sx={{ mb: 2 }}>
-                                    <Typography variant="body2" color="text.secondary">
-                                        Template taken from: {meme.templateInfo.templateCreator?.username || 'Unknown'}
-                                    </Typography>
-                                </Box>
-                            )}
-
-                            {/* Category and Tags */}
-                            <Box mb={2}>
-                                <Chip 
-                                    label={meme.category} 
-                                    color="primary" 
-                                    size="small"
-                                    sx={{ 
-                                        mr: 1,
-                                        background: theme.palette.mode === 'dark'
-                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                        backdropFilter: 'blur(20px)',
-                                        WebkitBackdropFilter: 'blur(20px)',
-                                        border: theme.palette.mode === 'dark'
-                                            ? '1px solid rgba(255, 255, 255, 0.3)'
-                                            : '1px solid rgba(0, 0, 0, 0.2)',
-                                        color: theme.palette.primary.main,
-                                        fontWeight: 700,
-                                        fontSize: '0.75rem',
-                                        boxShadow: theme.palette.mode === 'dark'
-                                            ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                            : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                    }}
-                                />
-                                {meme.tags?.map((tag, index) => (
-                                    <Chip 
-                                        key={index}
-                                        label={tag} 
-                                        variant="outlined" 
-                                        size="small"
-                                        sx={{ 
-                                            mr: 1, 
-                                            mb: 1,
-                                            background: theme.palette.mode === 'dark'
-                                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                            backdropFilter: 'blur(20px)',
-                                            WebkitBackdropFilter: 'blur(20px)',
-                                            border: theme.palette.mode === 'dark'
-                                                ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                : '1px solid rgba(0, 0, 0, 0.2)',
-                                            color: theme.palette.mode === 'dark' ? 'white' : 'black',
-                                            fontWeight: 700,
-                                            fontSize: '0.75rem',
-                                            boxShadow: theme.palette.mode === 'dark'
-                                                ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                        }}
-                                    />
-                                ))}
-                            </Box>
-
-                            {/* Stats */}
-                            <Box display="flex" gap={3} mb={2}>
-                                <Box display="flex" alignItems="center" gap={0.5}>
-                                    <FavoriteIcon color="action" fontSize="small" />
-                                    <Typography variant="body2">{meme.stats?.likesCount || 0} likes</Typography>
-                                </Box>
-                                <Box display="flex" alignItems="center" gap={0.5}>
-                                    <ViewIcon color="action" fontSize="small" />
-                                    <Typography variant="body2">{meme.stats?.viewsCount || 0} views</Typography>
-                                </Box>
-                            </Box>
-                        </CardContent>
-                        
-                        <CardActions>
-                            <IconButton 
-                                onClick={handleLike}
-                                color={liked ? "error" : "default"}
-                                disabled={!isAuthenticated}
-                            >
-                                {liked ? <FavoriteIcon /> : <FavoriteBorderIcon />}
-                            </IconButton>
-                            <IconButton onClick={handleShare}>
-                                <ShareIcon />
-                            </IconButton>
-                            <IconButton onClick={handleDownload}>
-                                <DownloadIcon />
-                            </IconButton>
-                            {isAuthenticated && user?.id !== meme.creator?.id && (
-                                <IconButton 
-                                    onClick={() => setReportDialogOpen(true)}
-                                    color="warning"
-                                >
-                                    <ReportIcon />
-                                </IconButton>
-                            )}
-                        </CardActions>
-                    </Card>
+                    </Box>
                 </Grid>
 
-                {/* Comments Section */}
-                <Grid item xs={12}>
-                    <CommentSection memeId={id} />
+                {/* Metadata + actions */}
+                <Grid item xs={12} md={5}>
+                    <Box
+                        sx={{
+                            p: 3,
+                            borderRadius: 3,
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            background: theme.palette.background.paper,
+                            boxShadow: theme.tokens?.shadow?.md,
+                            position: { md: 'sticky' },
+                            top: { md: 88 },
+                        }}
+                    >
+                        {/* Category + privacy */}
+                        <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
+                            {meme.category && (
+                                <Chip
+                                    label={meme.category}
+                                    size="small"
+                                    sx={{ textTransform: 'capitalize', fontWeight: 700 }}
+                                />
+                            )}
+                            {meme.isPublic === false && (
+                                <Chip
+                                    icon={<LockIcon sx={{ fontSize: 14 }} />}
+                                    label="Private"
+                                    size="small"
+                                    color="warning"
+                                    sx={{ fontWeight: 700 }}
+                                />
+                            )}
+                        </Stack>
+
+                        <Typography variant="h4" sx={{ fontWeight: 900, lineHeight: 1.15, mb: 1 }}>
+                            {meme.title}
+                        </Typography>
+
+                        {meme.description && (
+                            <Typography sx={{ color: theme.palette.text.secondary, mb: 2 }}>
+                                {meme.description}
+                            </Typography>
+                        )}
+
+                        {/* Creator row */}
+                        <Stack
+                            direction="row"
+                            spacing={1.5}
+                            alignItems="center"
+                            sx={{
+                                py: 1.5,
+                                my: 1,
+                                borderTop: `1px dashed ${theme.palette.brand?.borderSoft || theme.palette.divider}`,
+                                borderBottom: `1px dashed ${theme.palette.brand?.borderSoft || theme.palette.divider}`,
+                            }}
+                        >
+                            <Avatar
+                                src={creator.avatar || creator.profile?.avatar}
+                                component={RouterLink}
+                                to={creatorId ? `/users/${creatorId}` : '#'}
+                                sx={{
+                                    width: 40,
+                                    height: 40,
+                                    fontWeight: 900,
+                                    textDecoration: 'none',
+                                    background: theme.palette.brand?.gradient,
+                                }}
+                            >
+                                {(creator.profile?.displayName || creator.username || '?')
+                                    .charAt(0)
+                                    .toUpperCase()}
+                            </Avatar>
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography
+                                    component={RouterLink}
+                                    to={creatorId ? `/users/${creatorId}` : '#'}
+                                    sx={{
+                                        fontWeight: 800,
+                                        color: theme.palette.text.primary,
+                                        textDecoration: 'none',
+                                        display: 'block',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        '&:hover': { color: theme.palette.primary.main },
+                                    }}
+                                >
+                                    {creator.profile?.displayName || creator.username || 'Unknown creator'}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                                    {new Date(meme.createdAt).toLocaleDateString(undefined, {
+                                        year: 'numeric',
+                                        month: 'short',
+                                        day: 'numeric',
+                                    })}
+                                </Typography>
+                            </Box>
+                            {isAuthenticated && !isOwner && creatorId && (
+                                <FollowButton userId={creatorId} />
+                            )}
+                        </Stack>
+
+                        {/* Template attribution */}
+                        {meme.templateInfo?.templateCreator?.username && (
+                            <Typography
+                                variant="caption"
+                                sx={{ display: 'block', color: theme.palette.text.secondary, mb: 1.5 }}
+                            >
+                                Made from a template by{' '}
+                                <strong>@{meme.templateInfo.templateCreator.username}</strong>
+                            </Typography>
+                        )}
+
+                        {/* Tags */}
+                        {Array.isArray(meme.tags) && meme.tags.length > 0 && (
+                            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                                {meme.tags.map((tag) => (
+                                    <Chip
+                                        key={tag}
+                                        label={`#${tag}`}
+                                        variant="outlined"
+                                        size="small"
+                                        sx={{ fontWeight: 600 }}
+                                    />
+                                ))}
+                            </Stack>
+                        )}
+
+                        {/* Stats */}
+                        <Stack direction="row" spacing={3} sx={{ mb: 2.5 }}>
+                            <Stack direction="row" spacing={0.75} alignItems="center">
+                                <FavoriteIcon fontSize="small" sx={{ color: theme.palette.error.main }} />
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {meme.stats?.likesCount ?? 0}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                                    likes
+                                </Typography>
+                            </Stack>
+                            <Stack direction="row" spacing={0.75} alignItems="center">
+                                <ViewIcon fontSize="small" sx={{ color: theme.palette.info.main }} />
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {meme.stats?.viewsCount ?? meme.stats?.views ?? 0}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                                    views
+                                </Typography>
+                            </Stack>
+                            <Stack direction="row" spacing={0.75} alignItems="center">
+                                <CommentIcon fontSize="small" sx={{ color: theme.palette.secondary.main }} />
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {meme.stats?.commentsCount ?? 0}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                                    comments
+                                </Typography>
+                            </Stack>
+                        </Stack>
+
+                        <Divider sx={{ mb: 2 }} />
+
+                        {/* Action buttons */}
+                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                            <Button
+                                onClick={handleLike}
+                                disabled={!isAuthenticated}
+                                variant={liked ? 'contained' : 'outlined'}
+                                color={liked ? 'error' : 'inherit'}
+                                startIcon={liked ? <FavoriteIcon /> : <FavoriteBorderIcon />}
+                                sx={{ fontWeight: 700 }}
+                            >
+                                {liked ? 'Liked' : 'Like'}
+                            </Button>
+                            <Tooltip title="Share">
+                                <IconButton onClick={handleShare} aria-label="share">
+                                    <ShareIcon />
+                                </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Download">
+                                <IconButton onClick={handleDownload} aria-label="download">
+                                    <DownloadIcon />
+                                </IconButton>
+                            </Tooltip>
+                            {isAuthenticated && !isOwner && (
+                                <Tooltip title="Report">
+                                    <IconButton
+                                        onClick={() => setReportOpen(true)}
+                                        aria-label="report"
+                                        sx={{ color: theme.palette.warning.main }}
+                                    >
+                                        <ReportIcon />
+                                    </IconButton>
+                                </Tooltip>
+                            )}
+                        </Stack>
+                    </Box>
                 </Grid>
             </Grid>
 
-            {/* Report Dialog */}
-            <Dialog 
-                open={reportDialogOpen} 
-                onClose={() => setReportDialogOpen(false)}
+            {/* Comments */}
+            <Section
+                title="Comments"
+                subtitle="Drop a reaction, roast, or deep thought."
+                icon={<CommentIcon />}
+                dense
+            >
+                <Box
+                    sx={{
+                        p: { xs: 2, md: 3 },
+                        borderRadius: 3,
+                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                        background: theme.palette.background.paper,
+                        boxShadow: theme.tokens?.shadow?.sm,
+                    }}
+                >
+                    <CommentSection memeId={id} />
+                </Box>
+            </Section>
+
+            {/* Report dialog */}
+            <Dialog
+                open={reportOpen}
+                onClose={() => setReportOpen(false)}
                 maxWidth="sm"
                 fullWidth
+                PaperProps={{
+                    sx: {
+                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                        boxShadow: theme.tokens?.shadow?.lg,
+                    },
+                }}
             >
-                <DialogTitle>Report This Meme</DialogTitle>
+                <DialogTitle sx={{ fontWeight: 900 }}>Report this meme</DialogTitle>
                 <DialogContent>
+                    <Typography variant="body2" sx={{ color: theme.palette.text.secondary, mb: 2 }}>
+                        Reports are reviewed by moderators. Be specific so they can act quickly.
+                    </Typography>
                     <FormControl fullWidth margin="normal">
-                        <InputLabel>Reason for Report</InputLabel>
+                        <InputLabel id="report-reason-label">Reason</InputLabel>
                         <Select
+                            labelId="report-reason-label"
                             value={reportReason}
                             onChange={(e) => setReportReason(e.target.value)}
-                            label="Reason for Report"
+                            label="Reason"
                         >
-                            {reportReasons.map((reason) => (
+                            {REPORT_REASONS.map((reason) => (
                                 <MenuItem key={reason} value={reason}>
                                     {reason}
                                 </MenuItem>
@@ -444,39 +512,41 @@ const MemeDetail = () => {
                     <TextField
                         fullWidth
                         margin="normal"
-                        label="Additional Details (Optional)"
+                        label="Details (optional)"
                         multiline
                         rows={4}
                         value={reportDescription}
                         onChange={(e) => setReportDescription(e.target.value)}
-                        placeholder="Please provide additional details about why you're reporting this content..."
+                        placeholder="What specifically is the issue?"
                     />
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setReportDialogOpen(false)}>
-                        Cancel
-                    </Button>
-                    <Button 
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button onClick={() => setReportOpen(false)}>Cancel</Button>
+                    <Button
                         onClick={handleReport}
                         disabled={!reportReason}
+                        variant="contained"
                         color="warning"
                     >
-                        Submit Report
+                        Submit report
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Snackbar for notifications */}
+            {/* Snack */}
             <Snackbar
-                open={snackbar.open}
-                autoHideDuration={6000}
-                onClose={() => setSnackbar({ ...snackbar, open: false })}
+                open={snack.open}
+                autoHideDuration={4000}
+                onClose={() => setSnack((s) => ({ ...s, open: false }))}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
             >
-                <Alert 
-                    onClose={() => setSnackbar({ ...snackbar, open: false })} 
-                    severity={snackbar.severity}
+                <Alert
+                    onClose={() => setSnack((s) => ({ ...s, open: false }))}
+                    severity={snack.severity}
+                    variant="filled"
+                    sx={{ fontWeight: 700 }}
                 >
-                    {snackbar.message}
+                    {snack.message}
                 </Alert>
             </Snackbar>
         </Container>

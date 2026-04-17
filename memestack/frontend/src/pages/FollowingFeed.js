@@ -1,477 +1,227 @@
-// 📰 Following Feed Page Component
-// View memes from followed users
+// ============================================================================
+// FollowingFeed — chronological feed of memes from users you follow.
+// ----------------------------------------------------------------------------
+// Simple grid of MemeCards. When empty, nudges the user to browse the gallery
+// and follow some creators. Login required — blocked at the top otherwise.
+// ============================================================================
 
 import React, { useEffect, useState } from 'react';
 import {
-    Container,
-    Typography,
-    Box,
-    Grid,
-    Card,
-    CardMedia,
-    CardContent,
-    CardActions,
-    Chip,
-    IconButton,
-    Pagination,
     Alert,
+    Box,
     Button,
-    Paper,
-    Fade,
-    Zoom,
-    useTheme,
+    Container,
+    Grid,
+    Pagination,
+    Stack,
+    Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
-    Favorite as FavoriteIcon,
-    FavoriteBorder as FavoriteBorderIcon,
-    Download as DownloadIcon,
-    Share as ShareIcon,
+    RssFeed as FeedIcon,
     PersonAdd as PersonAddIcon,
+    Explore as ExploreIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
 import { followAPI, memeAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
-import LoadingSpinner from '../components/common/LoadingSpinner';
-import FollowButton from '../components/common/FollowButton';
+import {
+    PageHeader,
+    EmptyState,
+    MemeCard,
+    SkeletonCard,
+} from '../components/common';
 
 const FollowingFeed = () => {
+    const theme = useTheme();
     const navigate = useNavigate();
     const { user } = useAuth();
-    const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode() || { mode: 'light' };
+
     const [memes, setMemes] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [error, setError] = useState('');
+    const [page, setPage] = useState(1);
     const [pagination, setPagination] = useState({
         currentPage: 1,
         totalPages: 0,
         totalCount: 0,
-        hasNext: false
     });
-    const [page, setPage] = useState(1);
-
-    // Fetch following feed
-    const fetchFollowingFeed = async (pageNum = 1) => {
-        try {
-            setLoading(true);
-            setError(null);
-            const response = await followAPI.getFollowingFeed({
-                page: pageNum,
-                limit: 12
-            });
-            
-            setMemes(response.data.memes);
-            setPagination(response.data.pagination);
-        } catch (error) {
-            console.error('Error fetching following feed:', error);
-            setError(error.message || 'Failed to load feed');
-            setMemes([]);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     useEffect(() => {
-        if (user) {
-            fetchFollowingFeed(page);
-        }
+        if (!user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                setLoading(true);
+                setError('');
+                const response = await followAPI.getFollowingFeed({ page, limit: 12 });
+                if (cancelled) return;
+                setMemes(response.data.memes || []);
+                setPagination(response.data.pagination || { currentPage: 1, totalPages: 0, totalCount: 0 });
+            } catch (err) {
+                if (!cancelled) {
+                    setError(err.message || 'Failed to load feed');
+                    setMemes([]);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, [user, page]);
 
-    // Handle pagination
-    const handlePageChange = (event, newPage) => {
-        setPage(newPage);
-        fetchFollowingFeed(newPage);
-    };
-
-    // Handle download
-    const handleDownload = async (meme, event) => {
-        event.stopPropagation();
-        
-        try {
-            const response = await memeAPI.downloadMeme(meme.id);
-            
-            const blob = new Blob([response.data]);
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            
-            const contentDisposition = response.headers['content-disposition'];
-            let filename = `meme-${meme.id}-${meme.title.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`;
-            
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                if (filenameMatch) {
-                    filename = filenameMatch[1];
-                }
-            }
-            
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
-            
-        } catch (error) {
-            console.error('Download failed:', error);
-            alert('Failed to download meme. Please try again.');
-        }
-    };
-
-    // Handle like toggle
-    const handleLike = async (memeId, event) => {
-        event.stopPropagation();
-        
+    const handleLike = async (memeId) => {
         try {
             await memeAPI.toggleLike(memeId);
-            // Update local state
-            setMemes(prevMemes => 
-                prevMemes.map(meme => 
-                    meme.id === memeId 
+            setMemes((prev) =>
+                prev.map((m) =>
+                    m.id === memeId
                         ? {
-                            ...meme,
-                            isLiked: !meme.isLiked,
-                            stats: {
-                                ...meme.stats,
-                                likesCount: meme.isLiked 
-                                    ? meme.stats.likesCount - 1 
-                                    : meme.stats.likesCount + 1
-                            }
-                        }
-                        : meme
-                )
+                              ...m,
+                              isLiked: !m.isLiked,
+                              stats: {
+                                  ...m.stats,
+                                  likesCount: m.isLiked
+                                      ? Math.max(0, (m.stats?.likesCount || 0) - 1)
+                                      : (m.stats?.likesCount || 0) + 1,
+                              },
+                          }
+                        : m,
+                ),
             );
-        } catch (error) {
-            console.error('Error toggling like:', error);
+        } catch {
+            /* ignore */
         }
     };
 
     if (!user) {
         return (
-            <Container maxWidth="lg" sx={{ py: 4 }}>
-                <Alert severity="info">
-                    Please log in to view your following feed.
-                </Alert>
-            </Container>
+            <Box>
+                <PageHeader
+                    eyebrow="FOLLOWING"
+                    title="Your feed"
+                    subtitle="A chronological stream of memes from the creators you follow."
+                    icon={<FeedIcon />}
+                />
+                <Container maxWidth="md" sx={{ py: 4 }}>
+                    <Alert severity="info" sx={{ fontWeight: 600 }}>
+                        You need to be logged in to see your following feed.
+                    </Alert>
+                    <Stack direction="row" spacing={1.5} sx={{ mt: 2 }}>
+                        <Button variant="contained" onClick={() => navigate('/login')}>
+                            Log in
+                        </Button>
+                        <Button variant="outlined" onClick={() => navigate('/register')}>
+                            Create account
+                        </Button>
+                    </Stack>
+                </Container>
+            </Box>
         );
     }
 
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="lg">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                                    backdropFilter: 'blur(50px)',
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.15)'
-                                        : '2px solid rgba(99, 102, 241, 0.15)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.25)'
-                                        : '3px solid rgba(99, 102, 241, 0.25)',
-                                    borderRadius: '24px',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                        : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                                    '&::before': {
-                                        content: '""',
-                                        position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: '4px',
-                                        background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                    },
-                                }}
-                            >
-                                <Box sx={{ textAlign: 'center' }}>
-                                    <Typography 
-                                        variant="h3" 
-                                        component="h1" 
-                                        sx={{
-                                            fontWeight: 800,
-                                            mb: 2,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 1.5
-                                        }}
-                                    >
-                                        {/* Newspaper Emoji - Separate for Natural Colors */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                fontSize: 'inherit',
-                                                filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                                '&:hover': {
-                                                    transform: 'scale(1.1) rotate(-2deg)',
-                                                    transition: 'transform 0.3s ease',
-                                                },
-                                            }}
-                                        >
-                                            📰
-                                        </Box>
-                                        
-                                        {/* Following Feed Text with Gradient */}
-                                        <Box
-                                            component="span"
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                                backgroundClip: 'text',
-                                                WebkitBackgroundClip: 'text',
-                                                color: 'transparent',
-                                                // Fallback for browsers that don't support background-clip
-                                                '@supports not (-webkit-background-clip: text)': {
-                                                    background: 'none',
-                                                    color: currentThemeColors?.primary || '#6366f1',
-                                                },
-                                            }}
-                                        >
-                                            Following Feed
-                                        </Box>
-                                    </Typography>
-                                    <Typography 
-                                        variant="h6" 
-                                        sx={{ 
-                                            color: theme.palette.text.secondary,
-                                            fontWeight: 500,
-                                        }}
-                                    >
-                                        See the latest memes from creators you follow
-                                    </Typography>
-                                </Box>
-                            </Paper>
-                        </Zoom>
+        <Box>
+            <PageHeader
+                eyebrow="FOLLOWING"
+                title="Your feed"
+                subtitle="Fresh memes from the creators you follow. Oldest ones drift off the end as new ones land on top."
+                icon={<FeedIcon />}
+                actions={
+                    <Button
+                        variant="outlined"
+                        startIcon={<ExploreIcon />}
+                        onClick={() => navigate('/gallery')}
+                    >
+                        Browse gallery
+                    </Button>
+                }
+            />
 
-                        {/* Main Content Card */}
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                                backdropFilter: 'blur(50px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.15)'
-                                    : '2px solid rgba(99, 102, 241, 0.15)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.25)'
-                                    : '3px solid rgba(99, 102, 241, 0.25)',
-                                borderRadius: '20px',
-                                p: 4,
-                                boxShadow: mode === 'dark'
-                                    ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                    : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                            }}
-                        >
-            {loading ? (
-                <LoadingSpinner message="Loading your feed..." />
-            ) : error ? (
-                <Box sx={{ textAlign: 'center', py: 8 }}>
-                    <Alert severity="error" sx={{ mb: 2 }}>
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {error && (
+                    <Alert
+                        severity="error"
+                        sx={{ mb: 3 }}
+                        onClose={() => setError('')}
+                        action={
+                            <Button color="inherit" size="small" onClick={() => setPage(page)}>
+                                Retry
+                            </Button>
+                        }
+                    >
                         {error}
                     </Alert>
-                    <Button 
-                        variant="contained" 
-                        onClick={() => fetchFollowingFeed(page)}
-                    >
-                        Try Again
-                    </Button>
-                </Box>
-            ) : memes.length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 8 }}>
-                    <PersonAddIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" gutterBottom>
-                        Your feed is empty
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary" paragraph>
-                        Follow some creators to see their latest memes here!
-                    </Typography>
-                    <Button 
-                        variant="contained" 
-                        onClick={() => navigate('/gallery')}
-                        startIcon={<PersonAddIcon />}
-                    >
-                        Browse Gallery
-                    </Button>
-                </Box>
-            ) : (
-                <>
-                    {/* Memes Grid */}
-                    <Grid container spacing={3}>
-                        {memes.map((meme) => (
-                            <Grid item xs={12} sm={6} md={4} key={meme.id}>
-                                <Card
-                                    sx={{
-                                        height: '100%',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.3s ease-in-out',
-                                        background: mode === 'dark'
-                                            ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)'
-                                            : 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.8) 100%)',
-                                        backdropFilter: 'blur(40px)',
-                                        border: mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.1)'
-                                            : '2px solid rgba(99, 102, 241, 0.1)',
-                                        borderTop: mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.15)'
-                                            : '3px solid rgba(99, 102, 241, 0.15)',
-                                        borderRadius: '16px',
-                                        boxShadow: mode === 'dark'
-                                            ? '0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                                            : '0 12px 40px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                        '&:hover': {
-                                            transform: 'translateY(-4px) scale(1.02)',
-                                            boxShadow: mode === 'dark'
-                                                ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                : '0 20px 60px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
-                                        },
-                                    }}
-                                    onClick={() => navigate(`/meme/${meme.id}`)}
-                                >
-                                    <CardMedia
-                                        component="img"
-                                        height="200"
-                                        image={meme.imageUrl}
-                                        alt={meme.title}
-                                        sx={{ objectFit: 'cover' }}
-                                    />
-                                    <CardContent>
-                                        <Typography 
-                                            variant="h6" 
-                                            component="h3" 
-                                            gutterBottom
-                                            sx={{
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                whiteSpace: 'nowrap',
-                                            }}
-                                        >
-                                            {meme.title}
-                                        </Typography>
-                                        
-                                        {/* Creator Info */}
-                                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                                            <Typography variant="body2" color="text.secondary">
-                                                by {meme.creator?.username || 'Unknown'}
-                                            </Typography>
-                                            <Box sx={{ ml: 'auto' }} onClick={(e) => e.stopPropagation()}>
-                                                <FollowButton 
-                                                    userId={meme.creator?._id} 
-                                                    username={meme.creator?.username}
-                                                    variant="chip"
-                                                    size="small"
-                                                />
-                                            </Box>
-                                        </Box>
+                )}
 
-                                        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                                            <Chip 
-                                                label={meme.category} 
-                                                size="small" 
-                                                sx={{
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(139, 92, 246, 0.3) 100%)'
-                                                        : 'linear-gradient(135deg, rgba(99, 102, 241, 0.9) 0%, rgba(139, 92, 246, 0.9) 100%)',
-                                                    backdropFilter: 'blur(20px)',
-                                                    border: mode === 'dark'
-                                                        ? '1px solid rgba(99, 102, 241, 0.4)'
-                                                        : '1px solid rgba(99, 102, 241, 0.2)',
-                                                    color: mode === 'dark' ? 'rgba(255, 255, 255, 0.9)' : 'white',
-                                                    fontWeight: 600,
-                                                }}
-                                            />
-                                            <Chip 
-                                                label={`❤️ ${meme.stats?.likesCount || 0}`} 
-                                                size="small" 
-                                                sx={{
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                                        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
-                                                    backdropFilter: 'blur(20px)',
-                                                    border: mode === 'dark'
-                                                        ? '1px solid rgba(255, 255, 255, 0.15)'
-                                                        : '1px solid rgba(99, 102, 241, 0.2)',
-                                                    color: theme.palette.text.primary,
-                                                }}
-                                            />
-                                        </Box>
-                                        
-                                        <Typography 
-                                            variant="body2" 
-                                            color="text.secondary"
-                                            sx={{
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                display: '-webkit-box',
-                                                WebkitLineClamp: 2,
-                                                WebkitBoxOrient: 'vertical',
-                                            }}
-                                        >
-                                            {meme.description || 'No description available'}
-                                        </Typography>
-                                    </CardContent>
-                                    
-                                    <CardActions sx={{ justifyContent: 'space-between' }} onClick={(e) => e.stopPropagation()}>
-                                        <Box>
-                                            <IconButton
-                                                size="small"
-                                                color={meme.isLiked ? 'error' : 'default'}
-                                                onClick={(e) => handleLike(meme.id, e)}
-                                                title="Like meme"
-                                            >
-                                                {meme.isLiked ? <FavoriteIcon /> : <FavoriteBorderIcon />}
-                                            </IconButton>
-                                            <IconButton
-                                                size="small"
-                                                onClick={(e) => handleDownload(meme, e)}
-                                                title="Download meme"
-                                            >
-                                                <DownloadIcon />
-                                            </IconButton>
-                                        </Box>
-                                        <Typography variant="caption" color="text.secondary">
-                                            {new Date(meme.createdAt).toLocaleDateString()}
-                                        </Typography>
-                                    </CardActions>
-                                </Card>
+                {loading ? (
+                    <Grid container spacing={3}>
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <Grid item xs={12} sm={6} md={4} key={i}>
+                                <SkeletonCard />
                             </Grid>
                         ))}
                     </Grid>
+                ) : memes.length === 0 ? (
+                    <EmptyState
+                        icon={<PersonAddIcon sx={{ fontSize: 48 }} />}
+                        title="Your feed is empty"
+                        description="Follow a few creators and their latest memes will show up here."
+                        action={
+                            <Button
+                                variant="contained"
+                                startIcon={<ExploreIcon />}
+                                onClick={() => navigate('/gallery')}
+                            >
+                                Browse gallery
+                            </Button>
+                        }
+                    />
+                ) : (
+                    <>
+                        <Typography
+                            variant="caption"
+                            sx={{
+                                display: 'block',
+                                mb: 2,
+                                color: theme.palette.text.secondary,
+                                fontWeight: 700,
+                                letterSpacing: 0.6,
+                                textTransform: 'uppercase',
+                            }}
+                        >
+                            Showing {memes.length} of {pagination.totalCount || memes.length}
+                        </Typography>
 
-                    {/* Pagination */}
-                    {pagination.totalPages > 1 && (
-                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                            <Pagination
-                                count={pagination.totalPages}
-                                page={pagination.currentPage}
-                                onChange={handlePageChange}
-                                color="primary"
-                                size="large"
-                            />
-                        </Box>
-                    )}
-                </>
-            )}
-                        </Paper>
-                    </Box>
-                </Fade>
+                        <Grid container spacing={3}>
+                            {memes.map((meme) => (
+                                <Grid item xs={12} sm={6} md={4} key={meme.id || meme._id}>
+                                    <MemeCard
+                                        meme={meme}
+                                        onLike={() => handleLike(meme.id || meme._id)}
+                                        onClick={() => navigate(`/meme/${meme.id || meme._id}`)}
+                                        showCreator
+                                    />
+                                </Grid>
+                            ))}
+                        </Grid>
+
+                        {pagination.totalPages > 1 && (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                                <Pagination
+                                    count={pagination.totalPages}
+                                    page={pagination.currentPage}
+                                    onChange={(_, p) => setPage(p)}
+                                    color="primary"
+                                    size="large"
+                                />
+                            </Box>
+                        )}
+                    </>
+                )}
             </Container>
         </Box>
     );

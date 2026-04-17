@@ -1,90 +1,38 @@
-import axios from 'axios';
+// ============================================================================
+// folderAPI.js — compatibility re-export layer
+// ----------------------------------------------------------------------------
+// Consolidated into `services/api.js`. This file used to define its own axios
+// instance; now all folder calls go through the shared API client with unified
+// auth/error handling.
+//
+// Existing named imports remain supported. Prefer importing `foldersAPI` from
+// `services/api.js` in new code.
+// ============================================================================
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import { foldersAPI } from './api';
 
-// Create axios instance with default config
-const folderAPI = axios.create({
-    baseURL: `${API_URL}/folders`,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
+export const createFolder = (folderData) => foldersAPI.createFolder(folderData);
 
-// Add auth token to requests
-folderAPI.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-});
+export const getUserFolders = (params = {}) => foldersAPI.getFolders(params);
 
-// Handle response errors
-folderAPI.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '/login';
-        }
-        return Promise.reject(error);
-    }
-);
+export const getFolder = (folderId) => foldersAPI.getFolderById(folderId);
 
-// Folder CRUD operations
-export const createFolder = async (folderData) => {
-    const response = await folderAPI.post('/', folderData);
-    return response.data;
-};
+export const updateFolder = (folderId, folderData) =>
+    foldersAPI.updateFolder(folderId, folderData);
 
-export const getUserFolders = async (params = {}) => {
-    const queryParams = new URLSearchParams();
-    Object.keys(params).forEach(key => {
-        if (params[key]) queryParams.append(key, params[key]);
-    });
-    
-    const response = await folderAPI.get(`/?${queryParams}`);
-    return response.data;
-};
+export const deleteFolder = (folderId) => foldersAPI.deleteFolder(folderId);
 
-export const getFolder = async (folderId) => {
-    const response = await folderAPI.get(`/${folderId}`);
-    return response.data;
-};
+export const addMemeToFolder = (folderId, memeId) =>
+    foldersAPI.addMemeToFolder(folderId, memeId);
 
-export const updateFolder = async (folderId, folderData) => {
-    const response = await folderAPI.put(`/${folderId}`, folderData);
-    return response.data;
-};
+export const removeMemeFromFolder = (folderId, memeId) =>
+    foldersAPI.removeMemeFromFolder(folderId, memeId);
 
-export const deleteFolder = async (folderId) => {
-    const response = await folderAPI.delete(`/${folderId}`);
-    return response.data;
-};
+export const bulkAddMemesToFolder = (folderId, memeIds) =>
+    foldersAPI.bulkAddMemesToFolder(folderId, memeIds);
 
-// Meme management within folders
-export const addMemeToFolder = async (folderId, memeId) => {
-    const response = await folderAPI.post(`/${folderId}/memes/${memeId}`);
-    return response.data;
-};
+export const generateShareLink = (folderId) => foldersAPI.generateShareLink(folderId);
 
-export const removeMemeFromFolder = async (folderId, memeId) => {
-    const response = await folderAPI.delete(`/${folderId}/memes/${memeId}`);
-    return response.data;
-};
+export const getSharedFolder = (token) => foldersAPI.getSharedFolder(token);
 
-export const bulkAddMemesToFolder = async (folderId, memeIds) => {
-    const response = await folderAPI.post(`/${folderId}/memes/bulk`, { memeIds });
-    return response.data;
-};
-
-// Sharing
-export const generateShareLink = async (folderId) => {
-    const response = await folderAPI.post(`/${folderId}/share`);
-    return response.data;
-};
-
-export const getSharedFolder = async (token) => {
-    const response = await folderAPI.get(`/shared/${token}`);
-    return response.data;
-};
+export default foldersAPI;

@@ -1,672 +1,781 @@
-// 🎨 Create Template Page Component
-// Allow users to create new meme templates
+// ============================================================================
+// CreateTemplate — publish a reusable template to the library.
+// ----------------------------------------------------------------------------
+// Upload zone + metadata form. Optional: text-box hints (default captions,
+// positioning) so creators using the template see placeholders already placed.
+// The canvas editor itself lives on /create; templates here are just images
+// + metadata + optional default-text regions.
+// ============================================================================
 
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-    Container,
-    Typography,
     Box,
-    Card,
-    CardContent,
-    TextField,
     Button,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    Paper,
-    Alert,
-    LinearProgress,
-    useTheme,
+    Container,
     Grid,
-    IconButton,
+    TextField,
+    MenuItem,
+    Typography,
+    Alert,
+    Stack,
     Chip,
+    IconButton,
+    Switch,
+    FormControlLabel,
     Dialog,
     DialogTitle,
     DialogContent,
     DialogActions,
-    Fade,
-    Zoom,
+    Slider,
+    CircularProgress,
+    InputAdornment,
+    LinearProgress,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     CloudUpload as UploadIcon,
-    Create as CreateIcon,
-    Palette as PaletteIcon,
-    Add as AddIcon,
-    Delete as DeleteIcon,
     Save as SaveIcon,
-    Preview as PreviewIcon,
-    TextFields as TextIcon,
     Close as CloseIcon,
-    Check as CheckIcon,
+    Add as AddIcon,
+    DeleteOutline as DeleteIcon,
+    Tag as TagIcon,
+    Replay as ResetIcon,
+    Palette as TemplateIcon,
+    TextFields as TextIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
+
 import { templatesAPI } from '../services/api';
+import { PageHeader } from '../components/common';
+
+const CATEGORIES = [
+    'reaction',
+    'mocking',
+    'success',
+    'fail',
+    'advice',
+    'rage',
+    'popular',
+    'classic',
+    'freestyle',
+];
+
+const FONTS = ['Impact', 'Arial', 'Helvetica', 'Times New Roman', 'Comic Sans MS'];
+
+const DEFAULT_TEXT_AREA = {
+    id: '',
+    defaultText: '',
+    x: 50,
+    y: 50,
+    width: 80,
+    height: 15,
+    fontSize: 36,
+    fontFamily: 'Impact',
+    fontColor: '#FFFFFF',
+    strokeColor: '#000000',
+    strokeWidth: 2,
+    textAlign: 'center',
+    verticalAlign: 'middle',
+};
+
+const MAX_SIZE_MB = 10;
 
 const CreateTemplate = () => {
-    const navigate = useNavigate();
-    const { user } = useAuth();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode();
+    const navigate = useNavigate();
     const fileInputRef = useRef(null);
 
-    const [formData, setFormData] = useState({
+    const [form, setForm] = useState({
         name: '',
         description: '',
         category: 'popular',
         isPublic: true,
     });
+    const [tags, setTags] = useState([]);
+    const [tagDraft, setTagDraft] = useState('');
 
     const [imageFile, setImageFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState('');
-    const [imageDimensions, setImageDimensions] = useState({ width: 800, height: 600 });
+    const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
     const [textAreas, setTextAreas] = useState([]);
+    const [editing, setEditing] = useState(null);
+    const [editingIndex, setEditingIndex] = useState(null);
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [success, setSuccess] = useState(false);
-    const [showTextAreaDialog, setShowTextAreaDialog] = useState(false);
-    const [newTextArea, setNewTextArea] = useState({
-        id: '',
-        defaultText: '',
-        x: 50,  // Percentage from left
-        y: 50,  // Percentage from top
-        width: 80,  // Percentage width
-        height: 15, // Percentage height
-        fontSize: 36,
-        fontFamily: 'Impact',
-        fontColor: '#FFFFFF',
-        strokeColor: '#000000',
-        strokeWidth: 2,
-        textAlign: 'center',
-        verticalAlign: 'middle'
-    });
+    const [success, setSuccess] = useState('');
+    const [dragActive, setDragActive] = useState(false);
 
-    const categories = [
-        'reaction', 'mocking', 'success', 'fail', 'advice',
-        'rage', 'philosoraptor', 'first_world_problems', 
-        'conspiracy', 'confession', 'socially_awkward',
-        'good_guy', 'scumbag', 'popular', 'classic'
-    ];
-
-    const fontOptions = ['Impact', 'Arial', 'Helvetica', 'Times New Roman', 'Comic Sans MS'];
-
-    const handleInputChange = (e) => {
-        const { name, value, type, checked } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: type === 'checkbox' ? checked : value
-        }));
-    };
-
-    const handleFileChange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            if (file.size > 10 * 1024 * 1024) { // 10MB limit
-                setError('File size must be less than 10MB');
-                return;
-            }
-            
-            setImageFile(file);
-            const url = URL.createObjectURL(file);
-            setPreviewUrl(url);
-            
-            // Get image dimensions
-            const img = new Image();
-            img.onload = () => {
-                setImageDimensions({
-                    width: img.width,
-                    height: img.height
-                });
-            };
-            img.src = url;
-            
-            setError('');
-        }
-    };
-
-    const handleAddTextArea = () => {
-        const id = `text${textAreas.length + 1}`;
-        setNewTextArea(prev => ({ ...prev, id }));
-        setShowTextAreaDialog(true);
-    };
-
-    const handleSaveTextArea = () => {
-        if (!newTextArea.defaultText) {
-            setError('Text area must have default text');
+    // ---- file handling -----------------------------------------------------
+    const acceptFile = (file) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            setError('Pick an image (JPG, PNG, GIF, WebP).');
             return;
         }
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            setError(`Image too large. Keep it under ${MAX_SIZE_MB}MB.`);
+            return;
+        }
+        setError('');
+        setImageFile(file);
+        const url = URL.createObjectURL(file);
+        setPreviewUrl(url);
+        const img = new Image();
+        img.onload = () => setDimensions({ width: img.width, height: img.height });
+        img.src = url;
+    };
 
-        setTextAreas(prev => [...prev, { ...newTextArea }]);
-        setNewTextArea({
-            id: '',
-            defaultText: '',
-            x: 50,  // Percentage from left
-            y: 50,  // Percentage from top
-            width: 80,  // Percentage width
-            height: 15, // Percentage height
-            fontSize: 36,
-            fontFamily: 'Impact',
-            fontColor: '#FFFFFF',
-            strokeColor: '#000000',
-            strokeWidth: 2,
-            textAlign: 'center',
-            verticalAlign: 'middle'
-        });
-        setShowTextAreaDialog(false);
+    const resetImage = () => {
+        setImageFile(null);
+        setPreviewUrl('');
+    };
+
+    // ---- tags --------------------------------------------------------------
+    const addTag = () => {
+        const v = tagDraft.trim().replace(/^#/, '');
+        if (!v) return;
+        if (tags.length >= 10) {
+            setError('Max 10 tags per template.');
+            return;
+        }
+        if (!tags.includes(v)) setTags([...tags, v]);
+        setTagDraft('');
+    };
+    const removeTag = (t) => setTags(tags.filter((x) => x !== t));
+
+    // ---- text areas --------------------------------------------------------
+    const openNewArea = () =>
+        setEditing({ ...DEFAULT_TEXT_AREA, id: `text${textAreas.length + 1}` });
+
+    const openEditArea = (area, index) => {
+        setEditing({ ...area });
+        setEditingIndex(index);
+    };
+
+    const saveArea = () => {
+        if (!editing?.defaultText?.trim()) {
+            setError('Give the text box a default caption.');
+            return;
+        }
+        setTextAreas((prev) =>
+            editingIndex === null
+                ? [...prev, editing]
+                : prev.map((a, i) => (i === editingIndex ? editing : a)),
+        );
+        setEditing(null);
+        setEditingIndex(null);
         setError('');
     };
 
-    const handleRemoveTextArea = (index) => {
-        setTextAreas(prev => prev.filter((_, i) => i !== index));
+    const closeEditor = () => {
+        setEditing(null);
+        setEditingIndex(null);
     };
 
+    const removeArea = (i) => setTextAreas((prev) => prev.filter((_, idx) => idx !== i));
+
+    // ---- submit ------------------------------------------------------------
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
-        if (!formData.name) {
-            setError('Template name is required');
+        if (!form.name.trim()) {
+            setError('Give your template a name.');
             return;
         }
-
         if (!imageFile) {
-            setError('Template image is required');
+            setError('Upload a template image.');
             return;
         }
-
         setLoading(true);
         setError('');
-
         try {
-            const templateData = {
-                ...formData,
+            const resp = await templatesAPI.createTemplate({
+                ...form,
                 image: imageFile,
-                textAreas: textAreas,
-                dimensions: imageDimensions  // Add image dimensions
-            };
-
-            const response = await templatesAPI.createTemplate(templateData);
-
-            if (response.success) {
-                setSuccess(true);
-                setTimeout(() => {
-                    navigate('/templates');
-                }, 2000);
+                tags,
+                textAreas,
+                dimensions,
+            });
+            if (resp?.success) {
+                setSuccess('Template published — redirecting…');
+                setTimeout(() => navigate('/templates'), 1200);
             } else {
-                setError(response.message || 'Failed to create template');
+                throw new Error(resp?.message || 'Failed to publish template');
             }
-        } catch (error) {
-            console.error('Error creating template:', error);
-            setError(error.message || 'Failed to create template');
+        } catch (err) {
+            setError(err.message || 'Failed to publish template');
         } finally {
             setLoading(false);
         }
     };
 
-    if (success) {
-        return (
-            <Box sx={{
-                minHeight: '100vh',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            }}>
-                <Paper
-                    elevation={0}
-                    sx={{
-                        p: 6,
-                        textAlign: 'center',
-                        background: theme.palette.mode === 'dark'
-                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                        backdropFilter: 'blur(40px)',
-                        borderRadius: '20px',
-                        border: theme.palette.mode === 'dark'
-                            ? '2px solid rgba(255, 255, 255, 0.3)'
-                            : '2px solid rgba(0, 0, 0, 0.15)',
-                    }}
-                >
-                    <CheckIcon sx={{ fontSize: 80, color: 'success.main', mb: 2 }} />
-                    <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-                        Template Created Successfully!
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary">
-                        Your template is now available in the template gallery.
-                    </Typography>
-                </Paper>
-            </Box>
-        );
-    }
-
     return (
-        <Box sx={{
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="lg">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
+        <Box>
+            <PageHeader
+                eyebrow="NEW TEMPLATE"
+                title="Create a template"
+                subtitle="Publish a reusable template to the library so other creators can remix it."
+                icon={<TemplateIcon />}
+                actions={
+                    <Button
+                        variant="outlined"
+                        startIcon={<CloseIcon />}
+                        onClick={() => navigate('/templates')}
+                    >
+                        Cancel
+                    </Button>
+                }
+            />
+
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {error && (
+                    <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+                        {error}
+                    </Alert>
+                )}
+                {success && (
+                    <Alert severity="success" sx={{ mb: 3 }}>
+                        {success}
+                    </Alert>
+                )}
+
+                <Box component="form" onSubmit={handleSubmit}>
+                    <Grid container spacing={4}>
+                        {/* Left: image upload */}
+                        <Grid item xs={12} md={7}>
+                            <Box
+                                onDragOver={(e) => {
+                                    e.preventDefault();
+                                    setDragActive(true);
+                                }}
+                                onDragLeave={() => setDragActive(false)}
+                                onDrop={(e) => {
+                                    e.preventDefault();
+                                    setDragActive(false);
+                                    acceptFile(e.dataTransfer.files?.[0]);
+                                }}
                                 sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: theme.palette.mode === 'dark'
-                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                    backdropFilter: 'blur(50px)',
-                                    borderRadius: '24px',
-                                    border: theme.palette.mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.3)'
-                                        : '2px solid rgba(0, 0, 0, 0.15)',
-                                    textAlign: 'center',
+                                    borderRadius: 3,
+                                    border: `2px ${dragActive ? 'solid' : 'dashed'} ${
+                                        dragActive
+                                            ? theme.palette.primary.main
+                                            : theme.palette.brand?.border || theme.palette.divider
+                                    }`,
+                                    background: dragActive
+                                        ? theme.palette.brand?.surfaceSubtle
+                                        : theme.palette.background.paper,
+                                    boxShadow: theme.tokens?.shadow?.md,
+                                    overflow: 'hidden',
+                                    mb: 3,
                                 }}
                             >
-                                <Typography
-                                    variant="h3"
-                                    component="h1"
-                                    sx={{
-                                        fontWeight: 800,
-                                        mb: 2,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 2,
-                                    }}
-                                >
-                                    <PaletteIcon sx={{ fontSize: 'inherit', color: currentThemeColors?.primary }} />
+                                {previewUrl ? (
+                                    <Box sx={{ position: 'relative' }}>
+                                        <Box
+                                            component="img"
+                                            src={previewUrl}
+                                            alt="Preview"
+                                            sx={{
+                                                width: '100%',
+                                                maxHeight: 500,
+                                                objectFit: 'contain',
+                                                display: 'block',
+                                                background: theme.palette.brand?.surfaceSubtle,
+                                            }}
+                                        />
+                                        {/* Text-area overlays */}
+                                        {textAreas.map((a, i) => (
+                                            <Box
+                                                key={i}
+                                                onClick={() => openEditArea(a, i)}
+                                                sx={{
+                                                    position: 'absolute',
+                                                    left: `${a.x - a.width / 2}%`,
+                                                    top: `${a.y - a.height / 2}%`,
+                                                    width: `${a.width}%`,
+                                                    height: `${a.height}%`,
+                                                    border: `2px dashed ${theme.palette.primary.main}`,
+                                                    background: `${theme.palette.primary.main}20`,
+                                                    borderRadius: 1,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    textAlign: 'center',
+                                                    color: '#fff',
+                                                    fontFamily: a.fontFamily,
+                                                    fontSize: 14,
+                                                    fontWeight: 700,
+                                                    textShadow: '0 0 4px rgba(0,0,0,0.8)',
+                                                    px: 0.5,
+                                                    '&:hover': {
+                                                        background: `${theme.palette.primary.main}35`,
+                                                    },
+                                                }}
+                                            >
+                                                {a.defaultText}
+                                            </Box>
+                                        ))}
+                                        <Box
+                                            sx={{
+                                                position: 'absolute',
+                                                top: 12,
+                                                right: 12,
+                                                display: 'flex',
+                                                gap: 1,
+                                            }}
+                                        >
+                                            <IconButton
+                                                size="small"
+                                                onClick={resetImage}
+                                                sx={{
+                                                    background: theme.palette.background.paper,
+                                                    border: `2px solid ${theme.palette.brand?.border}`,
+                                                }}
+                                                aria-label="Remove image"
+                                            >
+                                                <CloseIcon fontSize="small" />
+                                            </IconButton>
+                                        </Box>
+                                    </Box>
+                                ) : (
                                     <Box
-                                        component="span"
+                                        onClick={() => fileInputRef.current?.click()}
                                         sx={{
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#ec4899'} 100%)`,
-                                            backgroundClip: 'text',
-                                            WebkitBackgroundClip: 'text',
-                                            color: 'transparent',
+                                            cursor: 'pointer',
+                                            textAlign: 'center',
+                                            p: 8,
+                                            minHeight: 320,
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
                                         }}
                                     >
-                                        Create Template
+                                        <Box
+                                            sx={{
+                                                width: 72,
+                                                height: 72,
+                                                borderRadius: 3,
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                border: `2px solid ${theme.palette.brand?.border}`,
+                                                background: theme.palette.brand?.gradient,
+                                                color: '#fff',
+                                                boxShadow: theme.tokens?.shadow?.md,
+                                                mb: 2,
+                                            }}
+                                        >
+                                            <UploadIcon sx={{ fontSize: 36 }} />
+                                        </Box>
+                                        <Typography variant="h5" sx={{ fontWeight: 900, mb: 0.5 }}>
+                                            Upload template image
+                                        </Typography>
+                                        <Typography
+                                            sx={{ color: theme.palette.text.secondary, mb: 3 }}
+                                        >
+                                            Drop an image here or click to choose. Up to{' '}
+                                            {MAX_SIZE_MB}MB.
+                                        </Typography>
+                                        <Button variant="contained" startIcon={<UploadIcon />}>
+                                            Choose file
+                                        </Button>
                                     </Box>
+                                )}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    hidden
+                                    onChange={(e) => acceptFile(e.target.files?.[0])}
+                                />
+                            </Box>
+
+                            {/* Text boxes */}
+                            {previewUrl && (
+                                <Box
+                                    sx={{
+                                        p: 2.5,
+                                        borderRadius: 3,
+                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                        background: theme.palette.background.paper,
+                                        boxShadow: theme.tokens?.shadow?.sm,
+                                    }}
+                                >
+                                    <Stack
+                                        direction="row"
+                                        justifyContent="space-between"
+                                        alignItems="center"
+                                        sx={{ mb: 1.5 }}
+                                    >
+                                        <Box>
+                                            <Typography sx={{ fontWeight: 900 }}>
+                                                Text boxes
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{ color: theme.palette.text.secondary }}
+                                            >
+                                                Optional. Suggest caption positions for remixers.
+                                            </Typography>
+                                        </Box>
+                                        <Button
+                                            size="small"
+                                            variant="contained"
+                                            startIcon={<AddIcon />}
+                                            onClick={openNewArea}
+                                        >
+                                            Add
+                                        </Button>
+                                    </Stack>
+                                    {textAreas.length === 0 ? (
+                                        <Typography
+                                            variant="body2"
+                                            sx={{ color: theme.palette.text.secondary }}
+                                        >
+                                            No text boxes yet. The template will publish as a plain
+                                            image if you skip this.
+                                        </Typography>
+                                    ) : (
+                                        <Stack spacing={1}>
+                                            {textAreas.map((a, i) => (
+                                                <Box
+                                                    key={i}
+                                                    sx={{
+                                                        p: 1.5,
+                                                        borderRadius: 2,
+                                                        border: `2px solid ${theme.palette.brand?.borderSoft || theme.palette.divider}`,
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 1.5,
+                                                    }}
+                                                >
+                                                    <TextIcon
+                                                        sx={{ color: theme.palette.primary.main }}
+                                                    />
+                                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                        <Typography
+                                                            sx={{
+                                                                fontWeight: 700,
+                                                                whiteSpace: 'nowrap',
+                                                                overflow: 'hidden',
+                                                                textOverflow: 'ellipsis',
+                                                            }}
+                                                        >
+                                                            {a.defaultText}
+                                                        </Typography>
+                                                        <Typography
+                                                            variant="caption"
+                                                            sx={{
+                                                                color: theme.palette.text.secondary,
+                                                            }}
+                                                        >
+                                                            {a.fontFamily} · {a.fontSize}px ·{' '}
+                                                            {a.x}%, {a.y}%
+                                                        </Typography>
+                                                    </Box>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => openEditArea(a, i)}
+                                                    >
+                                                        <TextIcon fontSize="small" />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => removeArea(i)}
+                                                    >
+                                                        <DeleteIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Box>
+                                            ))}
+                                        </Stack>
+                                    )}
+                                </Box>
+                            )}
+                        </Grid>
+
+                        {/* Right: metadata */}
+                        <Grid item xs={12} md={5}>
+                            <Box
+                                sx={{
+                                    p: 3,
+                                    borderRadius: 3,
+                                    border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                    background: theme.palette.background.paper,
+                                    boxShadow: theme.tokens?.shadow?.md,
+                                }}
+                            >
+                                <Typography variant="h6" sx={{ fontWeight: 900, mb: 2 }}>
+                                    Template details
                                 </Typography>
-                                <Typography variant="h6" sx={{ color: theme.palette.text.secondary }}>
-                                    Share your creativity by creating reusable meme templates
-                                </Typography>
-                            </Paper>
-                        </Zoom>
-
-                        {error && (
-                            <Alert severity="error" sx={{ mb: 3 }}>
-                                {error}
-                            </Alert>
-                        )}
-
-                        {/* Main Form */}
-                        <Paper
-                            elevation={0}
-                            component="form"
-                            onSubmit={handleSubmit}
-                            sx={{
-                                p: 4,
-                                background: theme.palette.mode === 'dark'
-                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                backdropFilter: 'blur(40px)',
-                                borderRadius: '20px',
-                                border: theme.palette.mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.3)'
-                                    : '2px solid rgba(0, 0, 0, 0.15)',
-                            }}
-                        >
-                            <Grid container spacing={4}>
-                                {/* Template Details */}
-                                <Grid item xs={12} md={6}>
-                                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 3 }}>
-                                        Template Details
-                                    </Typography>
-
+                                <Stack spacing={2}>
                                     <TextField
                                         fullWidth
-                                        label="Template Name"
+                                        label="Name"
                                         name="name"
-                                        value={formData.name}
-                                        onChange={handleInputChange}
+                                        value={form.name}
+                                        onChange={(e) =>
+                                            setForm({ ...form, name: e.target.value })
+                                        }
                                         required
-                                        sx={{ mb: 3 }}
                                     />
-
                                     <TextField
                                         fullWidth
                                         label="Description"
                                         name="description"
-                                        value={formData.description}
-                                        onChange={handleInputChange}
+                                        value={form.description}
+                                        onChange={(e) =>
+                                            setForm({ ...form, description: e.target.value })
+                                        }
                                         multiline
                                         rows={3}
-                                        sx={{ mb: 3 }}
+                                        inputProps={{ maxLength: 500 }}
+                                        helperText={`${form.description.length}/500`}
                                     />
-
-                                    <FormControl fullWidth sx={{ mb: 3 }}>
-                                        <InputLabel>Category</InputLabel>
-                                        <Select
-                                            name="category"
-                                            value={formData.category}
-                                            onChange={handleInputChange}
-                                            label="Category"
-                                        >
-                                            {categories.map((category) => (
-                                                <MenuItem key={category} value={category}>
-                                                    {category.charAt(0).toUpperCase() + category.slice(1)}
-                                                </MenuItem>
-                                            ))}
-                                        </Select>
-                                    </FormControl>
-
-                                    <FormControl fullWidth sx={{ mb: 3 }}>
-                                        <InputLabel>Visibility</InputLabel>
-                                        <Select
-                                            name="isPublic"
-                                            value={formData.isPublic}
-                                            onChange={(e) => setFormData(prev => ({ ...prev, isPublic: e.target.value }))}
-                                            label="Visibility"
-                                        >
-                                            <MenuItem value={true}>🌍 Public - Everyone can use this template</MenuItem>
-                                            <MenuItem value={false}>🔒 Private - Only you can use this template</MenuItem>
-                                        </Select>
-                                    </FormControl>
-                                </Grid>
-
-                                {/* Image Upload */}
-                                <Grid item xs={12} md={6}>
-                                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 3 }}>
-                                        Template Image
-                                    </Typography>
-
-                                    <Paper
-                                        sx={{
-                                            p: 3,
-                                            mb: 3,
-                                            background: theme.palette.mode === 'dark'
-                                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.05) 100%)'
-                                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 100%)',
-                                            border: theme.palette.mode === 'dark'
-                                                ? '2px dashed rgba(255, 255, 255, 0.4)'
-                                                : '2px dashed rgba(0, 0, 0, 0.3)',
-                                            borderRadius: '16px',
-                                            textAlign: 'center',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.3s ease',
-                                            '&:hover': {
-                                                background: theme.palette.mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.3) 100%)',
-                                                transform: 'translateY(-2px)',
-                                            },
-                                        }}
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        {previewUrl ? (
-                                            <img
-                                                src={previewUrl}
-                                                alt="Template Preview"
-                                                style={{
-                                                    maxWidth: '100%',
-                                                    maxHeight: 300,
-                                                    objectFit: 'contain',
-                                                    borderRadius: '8px',
-                                                }}
-                                            />
-                                        ) : (
-                                            <>
-                                                <UploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-                                                <Typography variant="h6" gutterBottom>
-                                                    Click to upload template image
-                                                </Typography>
-                                                <Typography variant="body2" color="text.secondary">
-                                                    Supports JPEG, PNG, GIF (Max 10MB)
-                                                </Typography>
-                                            </>
-                                        )}
-                                    </Paper>
-
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleFileChange}
-                                        style={{ display: 'none' }}
-                                    />
-
-                                    <Button
-                                        variant="outlined"
+                                    <TextField
+                                        select
                                         fullWidth
-                                        onClick={() => fileInputRef.current?.click()}
-                                        startIcon={<UploadIcon />}
+                                        label="Category"
+                                        value={form.category}
+                                        onChange={(e) =>
+                                            setForm({ ...form, category: e.target.value })
+                                        }
                                     >
-                                        {imageFile ? 'Change Image' : 'Choose Image'}
-                                    </Button>
-
-                                    {/* Image Dimensions */}
-                                    {imageFile && (
-                                        <Box sx={{ mt: 3 }}>
-                                            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                                                Image Dimensions
-                                            </Typography>
-                                            <Grid container spacing={2}>
-                                                <Grid item xs={6}>
-                                                    <TextField
-                                                        fullWidth
-                                                        label="Width (px)"
-                                                        type="number"
-                                                        value={imageDimensions.width}
-                                                        onChange={(e) => setImageDimensions(prev => ({ 
-                                                            ...prev, 
-                                                            width: parseInt(e.target.value) || 800 
-                                                        }))}
-                                                        InputProps={{ readOnly: false }}
-                                                        size="small"
-                                                    />
-                                                </Grid>
-                                                <Grid item xs={6}>
-                                                    <TextField
-                                                        fullWidth
-                                                        label="Height (px)"
-                                                        type="number"
-                                                        value={imageDimensions.height}
-                                                        onChange={(e) => setImageDimensions(prev => ({ 
-                                                            ...prev, 
-                                                            height: parseInt(e.target.value) || 600 
-                                                        }))}
-                                                        InputProps={{ readOnly: false }}
-                                                        size="small"
-                                                    />
-                                                </Grid>
-                                            </Grid>
-                                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                                                Detected from uploaded image. You can modify these values.
-                                            </Typography>
-                                        </Box>
-                                    )}
-                                </Grid>
-
-                                {/* Text Areas Configuration */}
-                                <Grid item xs={12}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                                        <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                                            Text Areas (Optional)
-                                        </Typography>
-                                        <Button
-                                            variant="contained"
-                                            startIcon={<AddIcon />}
-                                            onClick={handleAddTextArea}
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                            }}
+                                        {CATEGORIES.map((c) => (
+                                            <MenuItem key={c} value={c}>
+                                                {c.charAt(0).toUpperCase() + c.slice(1)}
+                                            </MenuItem>
+                                        ))}
+                                    </TextField>
+                                    <TextField
+                                        fullWidth
+                                        label="Add a tag"
+                                        value={tagDraft}
+                                        onChange={(e) => setTagDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ',') {
+                                                e.preventDefault();
+                                                addTag();
+                                            }
+                                        }}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <TagIcon fontSize="small" />
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                        helperText="Press Enter to add"
+                                    />
+                                    {tags.length > 0 && (
+                                        <Stack
+                                            direction="row"
+                                            spacing={1}
+                                            sx={{ flexWrap: 'wrap', gap: 1 }}
                                         >
-                                            Add Text Area
-                                        </Button>
-                                    </Box>
-
-                                    {textAreas.length === 0 ? (
-                                        <Paper sx={{ p: 3, textAlign: 'center', background: 'rgba(0,0,0,0.05)' }}>
-                                            <TextIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                                            <Typography variant="body1" color="text.secondary">
-                                                No text areas configured. Add text areas to define where users can place text on your template.
-                                            </Typography>
-                                        </Paper>
-                                    ) : (
-                                        <Grid container spacing={2}>
-                                            {textAreas.map((textArea, index) => (
-                                                <Grid item xs={12} sm={6} key={index}>
-                                                    <Card
-                                                        sx={{
-                                                            background: theme.palette.mode === 'dark'
-                                                                ? 'rgba(255, 255, 255, 0.05)'
-                                                                : 'rgba(255, 255, 255, 0.8)',
-                                                            backdropFilter: 'blur(10px)',
-                                                        }}
-                                                    >
-                                                        <CardContent>
-                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                                                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                                                                    {textArea.id}
-                                                                </Typography>
-                                                                <IconButton
-                                                                    size="small"
-                                                                    color="error"
-                                                                    onClick={() => handleRemoveTextArea(index)}
-                                                                >
-                                                                    <DeleteIcon />
-                                                                </IconButton>
-                                                            </Box>
-                                                            <Typography variant="body2" color="text.secondary" gutterBottom>
-                                                                Text: "{textArea.defaultText}"
-                                                            </Typography>
-                                                            <Typography variant="body2" color="text.secondary" gutterBottom>
-                                                                Position: {textArea.x}%, {textArea.y}%
-                                                            </Typography>
-                                                            <Typography variant="body2" color="text.secondary">
-                                                                Font: {textArea.fontFamily} ({textArea.fontSize}px)
-                                                            </Typography>
-                                                        </CardContent>
-                                                    </Card>
-                                                </Grid>
+                                            {tags.map((t) => (
+                                                <Chip
+                                                    key={t}
+                                                    label={`#${t}`}
+                                                    size="small"
+                                                    onDelete={() => removeTag(t)}
+                                                    sx={{ fontWeight: 700 }}
+                                                />
                                             ))}
-                                        </Grid>
+                                        </Stack>
                                     )}
-                                </Grid>
+                                    <FormControlLabel
+                                        control={
+                                            <Switch
+                                                checked={form.isPublic}
+                                                onChange={(e) =>
+                                                    setForm({
+                                                        ...form,
+                                                        isPublic: e.target.checked,
+                                                    })
+                                                }
+                                            />
+                                        }
+                                        label={
+                                            <Box>
+                                                <Typography sx={{ fontWeight: 700 }}>
+                                                    {form.isPublic
+                                                        ? 'Public template'
+                                                        : 'Private template'}
+                                                </Typography>
+                                                <Typography
+                                                    variant="caption"
+                                                    sx={{ color: theme.palette.text.secondary }}
+                                                >
+                                                    {form.isPublic
+                                                        ? 'Anyone can find and remix it.'
+                                                        : 'Only you can see and use it.'}
+                                                </Typography>
+                                            </Box>
+                                        }
+                                        sx={{ alignItems: 'flex-start', ml: 0 }}
+                                    />
+                                </Stack>
 
-                                {/* Submit Button */}
-                                <Grid item xs={12}>
-                                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 3 }}>
-                                        <Button
-                                            variant="outlined"
-                                            size="large"
-                                            onClick={() => navigate('/templates')}
-                                            sx={{ px: 4 }}
-                                        >
-                                            Cancel
-                                        </Button>
-                                        <Button
-                                            type="submit"
-                                            variant="contained"
-                                            size="large"
-                                            startIcon={loading ? null : <SaveIcon />}
-                                            disabled={loading || !formData.name || !imageFile}
-                                            sx={{
-                                                px: 4,
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                            }}
-                                        >
-                                            {loading ? (
-                                                <>
-                                                    <LinearProgress sx={{ width: 20, mr: 1 }} />
-                                                    Creating...
-                                                </>
+                                {loading && <LinearProgress sx={{ mt: 3 }} />}
+
+                                <Stack direction="row" spacing={1.5} sx={{ mt: 3 }}>
+                                    <Button
+                                        fullWidth
+                                        variant="outlined"
+                                        onClick={() => navigate('/templates')}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        fullWidth
+                                        type="submit"
+                                        variant="contained"
+                                        startIcon={
+                                            loading ? (
+                                                <CircularProgress size={16} color="inherit" />
                                             ) : (
-                                                'Create Template'
-                                            )}
-                                        </Button>
-                                    </Box>
-                                </Grid>
-                            </Grid>
-                        </Paper>
+                                                <SaveIcon />
+                                            )
+                                        }
+                                        disabled={loading}
+                                        sx={{ fontWeight: 800 }}
+                                    >
+                                        {loading ? 'Publishing…' : 'Publish'}
+                                    </Button>
+                                </Stack>
+                            </Box>
+                        </Grid>
+                    </Grid>
+                </Box>
+            </Container>
 
-                        {/* Text Area Configuration Dialog */}
-                        <Dialog
-                            open={showTextAreaDialog}
-                            onClose={() => setShowTextAreaDialog(false)}
-                            maxWidth="sm"
-                            fullWidth
-                        >
-                            <DialogTitle>Configure Text Area</DialogTitle>
-                            <DialogContent>
+            {/* Text area editor dialog */}
+            <Dialog
+                open={!!editing}
+                onClose={closeEditor}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                        boxShadow: theme.tokens?.shadow?.lg,
+                    },
+                }}
+            >
+                <DialogTitle sx={{ fontWeight: 900 }}>
+                    {editingIndex === null ? 'Add text box' : 'Edit text box'}
+                </DialogTitle>
+                <DialogContent>
+                    {editing && (
+                        <Stack spacing={2} sx={{ mt: 1 }}>
+                            <TextField
+                                fullWidth
+                                label="Default caption"
+                                value={editing.defaultText}
+                                onChange={(e) =>
+                                    setEditing({ ...editing, defaultText: e.target.value })
+                                }
+                                required
+                            />
+                            <Stack direction="row" spacing={2}>
                                 <TextField
                                     fullWidth
-                                    label="Default Text"
-                                    value={newTextArea.defaultText}
-                                    onChange={(e) => setNewTextArea(prev => ({ ...prev, defaultText: e.target.value }))}
-                                    sx={{ mb: 2, mt: 1 }}
+                                    select
+                                    label="Font"
+                                    value={editing.fontFamily}
+                                    onChange={(e) =>
+                                        setEditing({ ...editing, fontFamily: e.target.value })
+                                    }
+                                >
+                                    {FONTS.map((f) => (
+                                        <MenuItem key={f} value={f}>
+                                            {f}
+                                        </MenuItem>
+                                    ))}
+                                </TextField>
+                                <TextField
+                                    fullWidth
+                                    label="Font size"
+                                    type="number"
+                                    value={editing.fontSize}
+                                    onChange={(e) =>
+                                        setEditing({
+                                            ...editing,
+                                            fontSize: Number(e.target.value),
+                                        })
+                                    }
                                 />
-                                
-                                <Grid container spacing={2}>
-                                    <Grid item xs={6}>
-                                        <TextField
-                                            fullWidth
-                                            label="X Position (%)"
-                                            type="number"
-                                            value={newTextArea.x}
-                                            onChange={(e) => setNewTextArea(prev => ({ ...prev, x: parseInt(e.target.value) || 0 }))}
-                                            inputProps={{ min: 0, max: 100 }}
+                            </Stack>
+                            <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                                    POSITION
+                                </Typography>
+                                <Stack direction="row" spacing={3}>
+                                    <Box sx={{ flex: 1 }}>
+                                        <Typography variant="caption">X: {editing.x}%</Typography>
+                                        <Slider
+                                            value={editing.x}
+                                            onChange={(_, v) =>
+                                                setEditing({ ...editing, x: v })
+                                            }
+                                            min={0}
+                                            max={100}
                                         />
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                        <TextField
-                                            fullWidth
-                                            label="Y Position (%)"
-                                            type="number"
-                                            value={newTextArea.y}
-                                            onChange={(e) => setNewTextArea(prev => ({ ...prev, y: parseInt(e.target.value) || 0 }))}
-                                            inputProps={{ min: 0, max: 100 }}
+                                    </Box>
+                                    <Box sx={{ flex: 1 }}>
+                                        <Typography variant="caption">Y: {editing.y}%</Typography>
+                                        <Slider
+                                            value={editing.y}
+                                            onChange={(_, v) =>
+                                                setEditing({ ...editing, y: v })
+                                            }
+                                            min={0}
+                                            max={100}
                                         />
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                        <TextField
-                                            fullWidth
-                                            label="Font Size"
-                                            type="number"
-                                            value={newTextArea.fontSize}
-                                            onChange={(e) => setNewTextArea(prev => ({ ...prev, fontSize: parseInt(e.target.value) || 36 }))}
-                                            inputProps={{ min: 8, max: 72 }}
+                                    </Box>
+                                </Stack>
+                                <Stack direction="row" spacing={3}>
+                                    <Box sx={{ flex: 1 }}>
+                                        <Typography variant="caption">
+                                            Width: {editing.width}%
+                                        </Typography>
+                                        <Slider
+                                            value={editing.width}
+                                            onChange={(_, v) =>
+                                                setEditing({ ...editing, width: v })
+                                            }
+                                            min={10}
+                                            max={100}
                                         />
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                        <FormControl fullWidth>
-                                            <InputLabel>Font Family</InputLabel>
-                                            <Select
-                                                value={newTextArea.fontFamily}
-                                                onChange={(e) => setNewTextArea(prev => ({ ...prev, fontFamily: e.target.value }))}
-                                                label="Font Family"
-                                            >
-                                                {fontOptions.map((font) => (
-                                                    <MenuItem key={font} value={font}>{font}</MenuItem>
-                                                ))}
-                                            </Select>
-                                        </FormControl>
-                                    </Grid>
-                                </Grid>
-                            </DialogContent>
-                            <DialogActions>
-                                <Button onClick={() => setShowTextAreaDialog(false)}>Cancel</Button>
-                                <Button onClick={handleSaveTextArea} variant="contained">Add Text Area</Button>
-                            </DialogActions>
-                        </Dialog>
-                    </Box>
-                </Fade>
-            </Container>
+                                    </Box>
+                                    <Box sx={{ flex: 1 }}>
+                                        <Typography variant="caption">
+                                            Height: {editing.height}%
+                                        </Typography>
+                                        <Slider
+                                            value={editing.height}
+                                            onChange={(_, v) =>
+                                                setEditing({ ...editing, height: v })
+                                            }
+                                            min={5}
+                                            max={60}
+                                        />
+                                    </Box>
+                                </Stack>
+                            </Box>
+                        </Stack>
+                    )}
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button onClick={closeEditor}>Cancel</Button>
+                    <Button onClick={saveArea} variant="contained">
+                        {editingIndex === null ? 'Add' : 'Save'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 };

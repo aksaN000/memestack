@@ -733,9 +733,15 @@ const downloadMeme = async (req, res) => {
             });
         }
 
-        // Check if meme is private and user doesn't have access
-        if (meme.privacy === 'private') {
-            if (!req.user || meme.createdBy.toString() !== req.user._id.toString()) {
+        // Check if meme is private and user doesn't have access.
+        // The Meme model uses `isPublic` (boolean) and `creator` (ObjectId).
+        // The previous implementation read `meme.privacy === 'private'`
+        // against `meme.createdBy`, neither of which exist — so private
+        // memes were silently downloadable. Fixed.
+        if (meme.isPublic === false) {
+            const requesterId = req.user && (req.user._id || req.user.userId);
+            const ownerId = meme.creator && meme.creator.toString();
+            if (!requesterId || ownerId !== requesterId.toString()) {
                 return res.status(403).json({
                     success: false,
                     message: 'Access denied to private meme'

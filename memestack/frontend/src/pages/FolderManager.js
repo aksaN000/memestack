@@ -1,36 +1,38 @@
-import React, { useState, useEffect } from 'react';
+// ============================================================================
+// FolderManager — organize memes into personal folders (collections).
+// ----------------------------------------------------------------------------
+// Grid of folder cards with icon/color customization + create/edit dialog.
+// Context menu per folder: Edit / Share (copy link) / Delete.
+// Uses `foldersAPI` for CRUD and `generateShareLink` for share URLs.
+// ============================================================================
+
+import React, { useEffect, useState } from 'react';
 import {
-    Container,
-    Typography,
-    Grid,
-    Card,
-    CardContent,
-    CardActions,
-    Button,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    TextField,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    IconButton,
-    Chip,
-    Box,
     Alert,
+    Box,
+    Button,
+    Chip,
     CircularProgress,
-    Menu,
+    Container,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Divider,
+    FormControl,
+    Grid,
+    IconButton,
+    InputLabel,
     ListItemIcon,
     ListItemText,
-    Divider,
-    Tooltip,
-    Paper,
-    Fade,
-    Zoom,
-    useTheme,
+    Menu,
+    MenuItem,
+    Select,
+    Stack,
+    TextField,
+    Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Add as AddIcon,
     Folder as FolderIcon,
@@ -49,567 +51,454 @@ import {
     TrendingUp as TrendingUpIcon,
     Favorite as FavoriteIcon,
     Public as PublicIcon,
-    Label as TagIcon
+    Label as TagIcon,
 } from '@mui/icons-material';
-import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
+
 import { foldersAPI } from '../services/api';
+import { PageHeader, EmptyState } from '../components/common';
+
+const ICON_OPTIONS = [
+    { value: 'folder', label: 'Folder', icon: <FolderIcon /> },
+    { value: 'star', label: 'Star', icon: <StarIcon /> },
+    { value: 'bookmark', label: 'Bookmark', icon: <BookmarkIcon /> },
+    { value: 'image', label: 'Image', icon: <ImageIcon /> },
+    { value: 'work', label: 'Work', icon: <WorkIcon /> },
+    { value: 'school', label: 'School', icon: <SchoolIcon /> },
+    { value: 'home', label: 'Home', icon: <HomeIcon /> },
+    { value: 'sports', label: 'Sports', icon: <SportsIcon /> },
+    { value: 'music', label: 'Music', icon: <MusicIcon /> },
+    { value: 'trending_up', label: 'Trending', icon: <TrendingUpIcon /> },
+    { value: 'favorite', label: 'Favorite', icon: <FavoriteIcon /> },
+    { value: 'public', label: 'Public', icon: <PublicIcon /> },
+    { value: 'tag', label: 'Tag', icon: <TagIcon /> },
+];
+
+const COLOR_OPTIONS = [
+    '#6366f1', '#ec4899', '#10b981', '#f59e0b',
+    '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16',
+    '#f97316', '#6b7280', '#1f2937', '#7c3aed',
+];
+
+const getIcon = (name) => {
+    const match = ICON_OPTIONS.find((o) => o.value === name);
+    return match ? match.icon : <FolderIcon />;
+};
+
+const formatDate = (d) =>
+    new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
 const FolderManager = () => {
-    const { user } = useAuth();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode() || { mode: 'light' };
     const [folders, setFolders] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+
     const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedFolder, setSelectedFolder] = useState(null);
-    const [formData, setFormData] = useState({
+    const [form, setForm] = useState({
         name: '',
         description: '',
         color: '#6366f1',
         icon: 'folder',
-        isPrivate: true
+        isPrivate: true,
     });
+
     const [anchorEl, setAnchorEl] = useState(null);
-    const [selectedFolderForMenu, setSelectedFolderForMenu] = useState(null);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-
-    const iconOptions = [
-        { value: 'folder', label: 'Folder', icon: <FolderIcon /> },
-        { value: 'star', label: 'Star', icon: <StarIcon /> },
-        { value: 'bookmark', label: 'Bookmark', icon: <BookmarkIcon /> },
-        { value: 'image', label: 'Image', icon: <ImageIcon /> },
-        { value: 'work', label: 'Work', icon: <WorkIcon /> },
-        { value: 'school', label: 'School', icon: <SchoolIcon /> },
-        { value: 'home', label: 'Home', icon: <HomeIcon /> },
-        { value: 'sports', label: 'Sports', icon: <SportsIcon /> },
-        { value: 'music', label: 'Music', icon: <MusicIcon /> },
-        { value: 'trending_up', label: 'Trending', icon: <TrendingUpIcon /> },
-        { value: 'favorite', label: 'Favorite', icon: <FavoriteIcon /> },
-        { value: 'public', label: 'Public', icon: <PublicIcon /> },
-        { value: 'tag', label: 'Tag', icon: <TagIcon /> }
-    ];
-
-    const colorOptions = [
-        '#6366f1', '#ec4899', '#10b981', '#f59e0b',
-        '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16',
-        '#f97316', '#6b7280', '#1f2937', '#7c3aed'
-    ];
+    const [menuFolder, setMenuFolder] = useState(null);
 
     useEffect(() => {
-        loadFolders();
+        let cancelled = false;
+        (async () => {
+            try {
+                setLoading(true);
+                const resp = await foldersAPI.getFolders();
+                if (cancelled) return;
+                setFolders(resp.folders || []);
+            } catch (err) {
+                if (!cancelled) setError('Failed to load folders');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
-    const loadFolders = async () => {
+    const refresh = async () => {
         try {
-            setLoading(true);
-            const response = await foldersAPI.getFolders();
-            setFolders(response.folders || []);
-        } catch (err) {
-            setError('Failed to load folders');
-        } finally {
-            setLoading(false);
+            const resp = await foldersAPI.getFolders();
+            setFolders(resp.folders || []);
+        } catch {
+            /* ignore */
         }
     };
 
-    const handleCreateFolder = () => {
+    const openCreate = () => {
         setSelectedFolder(null);
-        setFormData({
+        setForm({
             name: '',
             description: '',
             color: '#6366f1',
             icon: 'folder',
-            isPrivate: true
+            isPrivate: true,
         });
         setDialogOpen(true);
     };
 
-    const handleEditFolder = (folder) => {
+    const openEdit = (folder) => {
         setSelectedFolder(folder);
-        setFormData({
+        setForm({
             name: folder.name,
             description: folder.description || '',
-            color: folder.color,
-            icon: folder.icon,
-            isPrivate: folder.isPrivate
+            color: folder.color || '#6366f1',
+            icon: folder.icon || 'folder',
+            isPrivate: folder.isPrivate ?? true,
         });
         setDialogOpen(true);
-        handleMenuClose();
+        closeMenu();
     };
 
-    const handleSubmit = async () => {
+    const submit = async () => {
         try {
             if (selectedFolder) {
-                await foldersAPI.updateFolder(selectedFolder._id, formData);
-                setSuccess('Folder updated successfully');
+                await foldersAPI.updateFolder(selectedFolder._id, form);
+                setSuccess('Folder updated.');
             } else {
-                await foldersAPI.createFolder(formData);
-                setSuccess('Folder created successfully');
+                await foldersAPI.createFolder(form);
+                setSuccess('Folder created.');
             }
             setDialogOpen(false);
-            loadFolders();
+            refresh();
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to save folder');
         }
     };
 
-    const handleDeleteFolder = async (folderId) => {
-        if (window.confirm('Are you sure you want to delete this folder? This action cannot be undone.')) {
-            try {
-                await foldersAPI.deleteFolder(folderId);
-                setSuccess('Folder deleted successfully');
-                loadFolders();
-            } catch (err) {
-                setError('Failed to delete folder');
-            }
+    const removeFolder = async (id) => {
+        if (!window.confirm('Delete this folder? This cannot be undone.')) return;
+        try {
+            await foldersAPI.deleteFolder(id);
+            setSuccess('Folder deleted.');
+            refresh();
+        } catch {
+            setError('Failed to delete folder');
         }
-        handleMenuClose();
+        closeMenu();
     };
 
-    const handleShareFolder = async (folderId) => {
+    const shareFolder = async (id) => {
         try {
-            const response = await foldersAPI.generateShareLink(folderId);
-            const shareUrl = `${window.location.origin}${response.shareUrl}`;
-            
-            // Copy to clipboard
-            await navigator.clipboard.writeText(shareUrl);
-            setSuccess('Share link copied to clipboard');
-        } catch (err) {
+            const resp = await foldersAPI.generateShareLink(id);
+            const url = `${window.location.origin}${resp.shareUrl}`;
+            await navigator.clipboard.writeText(url);
+            setSuccess('Share link copied to clipboard.');
+        } catch {
             setError('Failed to generate share link');
         }
-        handleMenuClose();
+        closeMenu();
     };
 
-    const handleMenuClick = (event, folder) => {
-        setAnchorEl(event.currentTarget);
-        setSelectedFolderForMenu(folder);
+    const openMenu = (e, folder) => {
+        setAnchorEl(e.currentTarget);
+        setMenuFolder(folder);
     };
-
-    const handleMenuClose = () => {
+    const closeMenu = () => {
         setAnchorEl(null);
-        setSelectedFolderForMenu(null);
-    };
-
-    const getIconComponent = (iconName) => {
-        const iconOption = iconOptions.find(opt => opt.value === iconName);
-        return iconOption ? iconOption.icon : <FolderIcon />;
-    };
-
-    const formatDate = (dateString) => {
-        return new Date(dateString).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
+        setMenuFolder(null);
     };
 
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="lg">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                                    backdropFilter: 'blur(50px)',
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.15)'
-                                        : '2px solid rgba(99, 102, 241, 0.15)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.25)'
-                                        : '3px solid rgba(99, 102, 241, 0.25)',
-                                    borderRadius: '24px',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                        : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                                    '&::before': {
-                                        content: '""',
-                                        position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: '4px',
-                                        background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                    },
-                                }}
+        <Box>
+            <PageHeader
+                eyebrow="COLLECTIONS"
+                title="Folder manager"
+                subtitle="Organize your memes into labeled collections. Pick an icon, pick a color, keep it private or share the link."
+                icon={<FolderIcon />}
+                actions={
+                    <Button
+                        variant="contained"
+                        startIcon={<AddIcon />}
+                        onClick={openCreate}
+                        sx={{ fontWeight: 800 }}
+                    >
+                        New folder
+                    </Button>
+                }
+            />
+
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {error && (
+                    <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+                        {error}
+                    </Alert>
+                )}
+                {success && (
+                    <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>
+                        {success}
+                    </Alert>
+                )}
+
+                {loading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+                        <CircularProgress />
+                    </Box>
+                ) : folders.length === 0 ? (
+                    <EmptyState
+                        icon={<FolderIcon sx={{ fontSize: 48 }} />}
+                        title="No folders yet"
+                        description="Create your first folder to organize your memes into neat collections."
+                        action={
+                            <Button
+                                variant="contained"
+                                startIcon={<AddIcon />}
+                                onClick={openCreate}
                             >
-                                <Box sx={{ position: 'relative', textAlign: 'center', width: '100%' }}>
-                                    <Box sx={{ textAlign: 'center' }}>
-                                        <Typography 
-                                            variant="h3" 
-                                            component="h1" 
-                                            sx={{
-                                                fontWeight: 800,
-                                                mb: 2,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                gap: 1.5
-                                            }}
-                                        >
-                                            {/* Folder Emoji - Separate for Natural Colors */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    fontSize: 'inherit',
-                                                    filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                                    '&:hover': {
-                                                        transform: 'scale(1.1) rotate(-2deg)',
-                                                        transition: 'transform 0.3s ease',
-                                                    },
-                                                }}
-                                            >
-                                                📁
-                                            </Box>
-                                            
-                                            {/* Folder Manager Text with Gradient */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                                    backgroundClip: 'text',
-                                                    WebkitBackgroundClip: 'text',
-                                                    color: 'transparent',
-                                                    // Fallback for browsers that don't support background-clip
-                                                    '@supports not (-webkit-background-clip: text)': {
-                                                        background: 'none',
-                                                        color: currentThemeColors?.primary || '#6366f1',
-                                                    },
-                                                }}
-                                            >
-                                                Folder Manager
-                                            </Box>
-                                        </Typography>
-                                        <Typography 
-                                            variant="h6" 
-                                            sx={{ 
-                                                color: theme.palette.text.secondary,
-                                                fontWeight: 500,
-                                            }}
-                                        >
-                                            Organize your memes into custom folders and collections
-                                        </Typography>
-                                    </Box>
-                                    
-                                    {/* Absolutely positioned button */}
-                                    <Box sx={{ position: 'absolute', top: 0, right: 0 }}>
-                                        <Button
-                                            variant="contained"
-                                            startIcon={<AddIcon />}
-                                            onClick={handleCreateFolder}
-                                            size="large"
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 100%)`,
-                                                color: 'white',
-                                                borderRadius: '16px',
-                                                px: 3,
-                                                py: 1.5,
-                                                textTransform: 'none',
-                                                fontSize: '1rem',
-                                                fontWeight: 600,
-                                                boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                                border: '1px solid rgba(255, 255, 255, 0.1)',
-                                                '&:hover': {
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#5b21b6'} 0%, ${currentThemeColors?.secondary || '#7c3aed'} 100%)`,
-                                                    transform: 'translateY(-2px)',
-                                                    boxShadow: '0 12px 40px rgba(99, 102, 241, 0.4)',
-                                                },
-                                                '&:active': {
-                                                    transform: 'translateY(0)',
-                                                },
-                                                transition: 'all 0.2s ease-in-out',
-                                            }}
-                                        >
-                                            Create Folder
-                                        </Button>
-                                    </Box>
-                                </Box>
-                            </Paper>
-                        </Zoom>
-
-                        {/* Main Content Card */}
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)'
-                                    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                                backdropFilter: 'blur(50px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.15)'
-                                    : '2px solid rgba(99, 102, 241, 0.15)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.25)'
-                                    : '3px solid rgba(99, 102, 241, 0.25)',
-                                borderRadius: '20px',
-                                boxShadow: mode === 'dark'
-                                    ? '0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                                    : '0 20px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.1)',
-                                p: 4,
-                            }}
-                        >
-            {error && (
-                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-                    {error}
-                </Alert>
-            )}
-
-            {success && (
-                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
-                    {success}
-                </Alert>
-            )}
-
-            {loading ? (
-                <Box display="flex" justifyContent="center" p={4}>
-                    <CircularProgress />
-                </Box>
-            ) : (
-                <Grid container spacing={3}>
-                    {folders.map((folder) => (
-                        <Grid item xs={12} sm={6} md={4} key={folder._id}>
-                            <Card
-                                sx={{
-                                    height: '100%',
-                                    cursor: 'pointer',
-                                    transition: 'transform 0.2s ease-in-out',
-                                    '&:hover': {
-                                        transform: 'translateY(-2px)',
-                                    },
-                                }}
-                            >
-                                <CardContent>
-                                    <Box display="flex" alignItems="center" mb={2}>
+                                Create your first folder
+                            </Button>
+                        }
+                    />
+                ) : (
+                    <Grid container spacing={3}>
+                        {folders.map((folder) => (
+                            <Grid item xs={12} sm={6} md={4} key={folder._id}>
+                                <Box
+                                    sx={{
+                                        p: 2.5,
+                                        height: '100%',
+                                        borderRadius: 3,
+                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                        background: theme.palette.background.paper,
+                                        boxShadow: theme.tokens?.shadow?.sm,
+                                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                                        '&:hover': {
+                                            transform: 'translate(-2px, -2px)',
+                                            boxShadow: theme.tokens?.shadow?.md,
+                                        },
+                                    }}
+                                >
+                                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
                                         <Box
                                             sx={{
-                                                width: 40,
-                                                height: 40,
-                                                borderRadius: 1,
-                                                backgroundColor: folder.color,
+                                                width: 48,
+                                                height: 48,
+                                                borderRadius: 2,
+                                                backgroundColor: folder.color || '#6366f1',
+                                                color: 'white',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
-                                                color: 'white',
-                                                mr: 2
+                                                border: `2px solid ${theme.palette.brand?.border || '#0f172a'}`,
+                                                boxShadow: theme.tokens?.shadow?.sm,
                                             }}
                                         >
-                                            {getIconComponent(folder.icon)}
+                                            {getIcon(folder.icon)}
                                         </Box>
-                                        <Box flex={1}>
-                                            <Typography variant="h6" noWrap>
+                                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                                            <Typography
+                                                sx={{ fontWeight: 800, lineHeight: 1.2 }}
+                                                noWrap
+                                                title={folder.name}
+                                            >
                                                 {folder.name}
                                             </Typography>
-                                            <Typography variant="body2" color="text.secondary">
-                                                {folder.memeCount} memes
+                                            <Typography
+                                                variant="caption"
+                                                sx={{ color: theme.palette.text.secondary }}
+                                            >
+                                                {folder.memeCount || 0} meme{(folder.memeCount || 0) === 1 ? '' : 's'}
                                             </Typography>
                                         </Box>
                                         <IconButton
                                             size="small"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleMenuClick(e, folder);
-                                            }}
+                                            onClick={(e) => openMenu(e, folder)}
+                                            aria-label="folder actions"
                                         >
                                             <MoreVertIcon />
                                         </IconButton>
-                                    </Box>
+                                    </Stack>
 
                                     {folder.description && (
                                         <Typography
                                             variant="body2"
-                                            color="text.secondary"
                                             sx={{
-                                                mb: 2,
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
+                                                color: theme.palette.text.secondary,
+                                                mb: 1.5,
                                                 display: '-webkit-box',
                                                 WebkitLineClamp: 2,
                                                 WebkitBoxOrient: 'vertical',
+                                                overflow: 'hidden',
                                             }}
                                         >
                                             {folder.description}
                                         </Typography>
                                     )}
 
-                                    <Box display="flex" gap={1} mb={2}>
+                                    <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
                                         <Chip
                                             label={folder.isPrivate ? 'Private' : 'Public'}
                                             size="small"
                                             color={folder.isPrivate ? 'default' : 'primary'}
+                                            sx={{ fontWeight: 700 }}
                                         />
                                         {folder.sharing?.isPublic && (
                                             <Chip
                                                 label="Shared"
                                                 size="small"
                                                 color="secondary"
+                                                sx={{ fontWeight: 700 }}
                                             />
                                         )}
-                                    </Box>
+                                    </Stack>
 
-                                    <Typography variant="caption" color="text.secondary">
+                                    <Typography
+                                        variant="caption"
+                                        sx={{ color: theme.palette.text.secondary }}
+                                    >
                                         Created {formatDate(folder.createdAt)}
                                     </Typography>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-                    ))}
+                                </Box>
+                            </Grid>
+                        ))}
+                    </Grid>
+                )}
 
-                    {folders.length === 0 && (
-                        <Grid item xs={12}>
-                            <Box textAlign="center" py={8}>
-                                <FolderIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                                <Typography variant="h6" gutterBottom>
-                                    No folders yet
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary" mb={3}>
-                                    Create your first folder to organize your memes
-                                </Typography>
-                                <Button
-                                    variant="contained"
-                                    startIcon={<AddIcon />}
-                                    onClick={handleCreateFolder}
-                                >
-                                    Create Your First Folder
-                                </Button>
-                            </Box>
-                        </Grid>
-                    )}
-                </Grid>
-            )}
-
-            {/* Context Menu */}
-            <Menu
-                anchorEl={anchorEl}
-                open={Boolean(anchorEl)}
-                onClose={handleMenuClose}
-            >
-                <MenuItem onClick={() => handleEditFolder(selectedFolderForMenu)}>
-                    <ListItemIcon>
-                        <EditIcon />
-                    </ListItemIcon>
-                    <ListItemText>Edit Folder</ListItemText>
-                </MenuItem>
-                <MenuItem onClick={() => handleShareFolder(selectedFolderForMenu?._id)}>
-                    <ListItemIcon>
-                        <ShareIcon />
-                    </ListItemIcon>
-                    <ListItemText>Share Folder</ListItemText>
-                </MenuItem>
-                <Divider />
-                <MenuItem 
-                    onClick={() => handleDeleteFolder(selectedFolderForMenu?._id)}
-                    sx={{ color: 'error.main' }}
-                >
-                    <ListItemIcon>
-                        <DeleteIcon color="error" />
-                    </ListItemIcon>
-                    <ListItemText>Delete Folder</ListItemText>
-                </MenuItem>
-            </Menu>
-
-            {/* Create/Edit Folder Dialog */}
-            <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>
-                    {selectedFolder ? 'Edit Folder' : 'Create New Folder'}
-                </DialogTitle>
-                <DialogContent>
-                    <TextField
-                        fullWidth
-                        label="Folder Name"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        margin="normal"
-                        required
-                    />
-                    <TextField
-                        fullWidth
-                        label="Description (Optional)"
-                        value={formData.description}
-                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                        margin="normal"
-                        multiline
-                        rows={2}
-                    />
-                    <FormControl fullWidth margin="normal">
-                        <InputLabel>Icon</InputLabel>
-                        <Select
-                            value={formData.icon}
-                            label="Icon"
-                            onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                        >
-                            {iconOptions.map((option) => (
-                                <MenuItem key={option.value} value={option.value}>
-                                    <Box display="flex" alignItems="center">
-                                        {option.icon}
-                                        <Typography sx={{ ml: 1 }}>{option.label}</Typography>
-                                    </Box>
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <Box mt={2}>
-                        <Typography variant="subtitle2" gutterBottom>
-                            Color
-                        </Typography>
-                        <Box display="flex" gap={1} flexWrap="wrap">
-                            {colorOptions.map((color) => (
-                                <Box
-                                    key={color}
-                                    sx={{
-                                        width: 32,
-                                        height: 32,
-                                        backgroundColor: color,
-                                        borderRadius: 1,
-                                        cursor: 'pointer',
-                                        border: formData.color === color ? '3px solid #000' : '1px solid #ddd',
-                                    }}
-                                    onClick={() => setFormData({ ...formData, color })}
-                                />
-                            ))}
-                        </Box>
-                    </Box>
-                    <FormControl fullWidth margin="normal">
-                        <InputLabel>Privacy</InputLabel>
-                        <Select
-                            value={formData.isPrivate}
-                            label="Privacy"
-                            onChange={(e) => setFormData({ ...formData, isPrivate: e.target.value })}
-                        >
-                            <MenuItem value={true}>Private</MenuItem>
-                            <MenuItem value={false}>Public</MenuItem>
-                        </Select>
-                    </FormControl>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setDialogOpen(false)}>
-                        Cancel
-                    </Button>
-                    <Button
-                        onClick={handleSubmit}
-                        variant="contained"
-                        disabled={!formData.name.trim()}
+                {/* Context menu */}
+                <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={closeMenu}>
+                    <MenuItem onClick={() => openEdit(menuFolder)}>
+                        <ListItemIcon>
+                            <EditIcon fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText>Edit folder</ListItemText>
+                    </MenuItem>
+                    <MenuItem onClick={() => shareFolder(menuFolder?._id)}>
+                        <ListItemIcon>
+                            <ShareIcon fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText>Copy share link</ListItemText>
+                    </MenuItem>
+                    <Divider />
+                    <MenuItem
+                        onClick={() => removeFolder(menuFolder?._id)}
+                        sx={{ color: theme.palette.error.main }}
                     >
-                        {selectedFolder ? 'Update' : 'Create'}
-                    </Button>
-                </DialogActions>
-            </Dialog>
-                        </Paper>
-                    </Box>
-                </Fade>
+                        <ListItemIcon>
+                            <DeleteIcon fontSize="small" color="error" />
+                        </ListItemIcon>
+                        <ListItemText>Delete folder</ListItemText>
+                    </MenuItem>
+                </Menu>
+
+                {/* Create / edit dialog */}
+                <Dialog
+                    open={dialogOpen}
+                    onClose={() => setDialogOpen(false)}
+                    maxWidth="sm"
+                    fullWidth
+                    PaperProps={{
+                        sx: {
+                            borderRadius: 3,
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            boxShadow: theme.tokens?.shadow?.lg,
+                        },
+                    }}
+                >
+                    <DialogTitle sx={{ fontWeight: 900 }}>
+                        {selectedFolder ? 'Edit folder' : 'New folder'}
+                    </DialogTitle>
+                    <DialogContent dividers>
+                        <Stack spacing={2.5} sx={{ pt: 1 }}>
+                            <TextField
+                                fullWidth
+                                label="Folder name"
+                                value={form.name}
+                                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                                required
+                                autoFocus
+                            />
+                            <TextField
+                                fullWidth
+                                label="Description (optional)"
+                                value={form.description}
+                                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                                multiline
+                                rows={2}
+                                inputProps={{ maxLength: 200 }}
+                            />
+
+                            <FormControl fullWidth>
+                                <InputLabel>Icon</InputLabel>
+                                <Select
+                                    value={form.icon}
+                                    label="Icon"
+                                    onChange={(e) => setForm({ ...form, icon: e.target.value })}
+                                >
+                                    {ICON_OPTIONS.map((opt) => (
+                                        <MenuItem key={opt.value} value={opt.value}>
+                                            <Stack direction="row" spacing={1} alignItems="center">
+                                                {opt.icon}
+                                                <Typography>{opt.label}</Typography>
+                                            </Stack>
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+
+                            <Box>
+                                <Typography sx={{ fontWeight: 700, mb: 1 }}>Color</Typography>
+                                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                    {COLOR_OPTIONS.map((c) => (
+                                        <Box
+                                            key={c}
+                                            onClick={() => setForm({ ...form, color: c })}
+                                            sx={{
+                                                width: 36,
+                                                height: 36,
+                                                borderRadius: 2,
+                                                backgroundColor: c,
+                                                cursor: 'pointer',
+                                                border:
+                                                    form.color === c
+                                                        ? `3px solid ${theme.palette.brand?.accent || theme.palette.primary.main}`
+                                                        : `2px solid ${theme.palette.divider}`,
+                                                boxShadow:
+                                                    form.color === c ? theme.tokens?.shadow?.sm : 'none',
+                                                transition: 'transform 0.1s',
+                                                '&:hover': { transform: 'scale(1.08)' },
+                                            }}
+                                        />
+                                    ))}
+                                </Stack>
+                            </Box>
+
+                            <FormControl fullWidth>
+                                <InputLabel>Privacy</InputLabel>
+                                <Select
+                                    value={form.isPrivate}
+                                    label="Privacy"
+                                    onChange={(e) =>
+                                        setForm({ ...form, isPrivate: e.target.value })
+                                    }
+                                >
+                                    <MenuItem value={true}>Private (only me)</MenuItem>
+                                    <MenuItem value={false}>Public (anyone with the link)</MenuItem>
+                                </Select>
+                            </FormControl>
+                        </Stack>
+                    </DialogContent>
+                    <DialogActions sx={{ px: 3, py: 2 }}>
+                        <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+                        <Button
+                            onClick={submit}
+                            variant="contained"
+                            disabled={!form.name.trim()}
+                            sx={{ fontWeight: 800, minWidth: 120 }}
+                        >
+                            {selectedFolder ? 'Save changes' : 'Create folder'}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
             </Container>
         </Box>
     );

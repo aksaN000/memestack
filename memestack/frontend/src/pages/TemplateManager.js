@@ -1,226 +1,200 @@
-import React, { useState, useEffect } from 'react';
+// ============================================================================
+// TemplateManager — browse, create, edit, and delete meme templates.
+// ----------------------------------------------------------------------------
+// PageHeader with CTA + filter bar + template grid. Cards show template
+// thumbnail, name, category, privacy, usage count, and creator. Owners get a
+// context menu with edit/delete actions. Dialogs handle create/edit/delete.
+// ============================================================================
+
+import React, { useEffect, useState } from 'react';
 import {
-    Container,
-    Typography,
-    Grid,
-    Card,
-    CardContent,
-    CardMedia,
-    CardActions,
-    Button,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    TextField,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    IconButton,
-    Chip,
-    Box,
     Alert,
-    CircularProgress,
-    Menu,
+    Box,
+    Button,
+    Chip,
+    Container,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    FormControl,
+    FormControlLabel,
+    Grid,
+    IconButton,
+    InputAdornment,
+    InputLabel,
     ListItemIcon,
     ListItemText,
-    Divider,
+    Menu,
+    MenuItem,
+    Pagination,
+    Select,
+    Stack,
     Switch,
-    FormControlLabel,
-    Tooltip,
-    Fab,
-    Paper,
-    Fade,
-    Zoom,
-    useTheme,
+    TextField,
+    Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Add as AddIcon,
-    Edit as EditIcon,
+    Category as CategoryIcon,
+    CloudUpload as CloudUploadIcon,
+    Collections as CollectionsIcon,
     Delete as DeleteIcon,
+    Edit as EditIcon,
     MoreVert as MoreVertIcon,
+    Search as SearchIcon,
     Visibility as VisibilityIcon,
     VisibilityOff as VisibilityOffIcon,
-    CloudUpload as CloudUploadIcon,
-    Category as CategoryIcon,
-    Search as SearchIcon,
-    FilterList as FilterListIcon
 } from '@mui/icons-material';
-import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
-import { templatesAPI } from '../services/api';
 
-// Utility function to get full image URL
+import { useAuth } from '../contexts/AuthContext';
+import { templatesAPI } from '../services/api';
+import { PageHeader, EmptyState, SkeletonCard } from '../components/common';
+
+// ---------------------------------------------------------------------------
+// Utility — resolve a template image URL to an absolute path if needed.
 const getImageUrl = (imageUrl) => {
     if (!imageUrl) return '';
-    // If it's already a full URL (starts with http), return as is
     if (imageUrl.startsWith('http')) return imageUrl;
-    // If it's a local path (starts with /uploads), prepend backend URL
     if (imageUrl.startsWith('/uploads')) {
         const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-        // Remove /api from base URL if present, since uploads are served from root
         const serverURL = baseURL.replace('/api', '');
         return `${serverURL}${imageUrl}`;
     }
-    // For any other format, return as is
     return imageUrl;
 };
 
+const emptyForm = {
+    name: '',
+    category: 'general',
+    description: '',
+    isPublic: false,
+    image: null,
+};
+
 const TemplateManager = () => {
-    const { user } = useAuth();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode() || { mode: 'light', currentThemeColors: null };
+    const { user } = useAuth();
+
     const [templates, setTemplates] = useState([]);
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
-    // Pagination
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
-    const [hasNext, setHasNext] = useState(false);
 
-    // Filters
     const [selectedCategory, setSelectedCategory] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
-    const [showMyTemplates, setShowMyTemplates] = useState(false);
+    const [showMine, setShowMine] = useState(false);
 
-    // Dialog states
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [editDialogOpen, setEditDialogOpen] = useState(false);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
+    const [editOpen, setEditOpen] = useState(false);
+    const [deleteOpen, setDeleteOpen] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState(null);
-
-    // Form state
-    const [formData, setFormData] = useState({
-        name: '',
-        category: 'general',
-        description: '',
-        isPublic: false,
-        image: null
-    });
-
-    // Menu state
+    const [formData, setFormData] = useState(emptyForm);
     const [anchorEl, setAnchorEl] = useState(null);
 
+    // ------------------------------------------------------------------ load
     useEffect(() => {
-        loadTemplates();
-        loadCategories();
-    }, [page, selectedCategory, searchTerm, showMyTemplates]);
-
-    const loadTemplates = async () => {
-        try {
-            setLoading(true);
-            const params = {
-                page,
-                limit: 12,
-                category: selectedCategory !== 'all' ? selectedCategory : undefined,
-                search: searchTerm || undefined
-            };
-
-            const response = showMyTemplates 
-                ? await templatesAPI.getUserTemplates(params)
-                : await templatesAPI.getTemplates(params);
-
-            setTemplates(response.templates);
-            setTotalPages(response.pagination.totalPages);
-            setHasNext(response.pagination.hasNext);
-        } catch (error) {
-            setError(error.message || 'Failed to load templates');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const loadCategories = async () => {
-        try {
-            const response = await templatesAPI.getCategories();
-            setCategories(response.categories);
-        } catch (error) {
-            console.error('Failed to load categories:', error);
-        }
-    };
-
-    const handleCreateTemplate = async () => {
-        try {
-            setLoading(true);
-            
-            // Create FormData for file upload
-            const formDataToSend = new FormData();
-            formDataToSend.append('name', formData.name);
-            formDataToSend.append('category', formData.category);
-            formDataToSend.append('description', formData.description);
-            formDataToSend.append('isPublic', formData.isPublic);
-            
-            if (formData.image) {
-                formDataToSend.append('image', formData.image);
+        let cancelled = false;
+        (async () => {
+            try {
+                setLoading(true);
+                const params = {
+                    page,
+                    limit: 12,
+                    category: selectedCategory !== 'all' ? selectedCategory : undefined,
+                    search: searchTerm || undefined,
+                };
+                const response = showMine
+                    ? await templatesAPI.getUserTemplates(params)
+                    : await templatesAPI.getTemplates(params);
+                if (cancelled) return;
+                setTemplates(response.templates || []);
+                setTotalPages(response.pagination?.totalPages || 1);
+            } catch (e) {
+                if (!cancelled) setError(e.message || 'Failed to load templates');
+            } finally {
+                if (!cancelled) setLoading(false);
             }
-            
-            await templatesAPI.createTemplate(formDataToSend);
-            setSuccess('Template created successfully!');
-            setCreateDialogOpen(false);
-            resetForm();
-            loadTemplates();
-        } catch (error) {
-            setError(error.message || 'Failed to create template');
-        } finally {
-            setLoading(false);
-        }
-    };
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [page, selectedCategory, searchTerm, showMine]);
 
-    const handleUpdateTemplate = async () => {
-        try {
-            setLoading(true);
-            
-            // Create FormData for file upload
-            const formDataToSend = new FormData();
-            formDataToSend.append('name', formData.name);
-            formDataToSend.append('category', formData.category);
-            formDataToSend.append('description', formData.description);
-            formDataToSend.append('isPublic', formData.isPublic);
-            
-            if (formData.image) {
-                formDataToSend.append('image', formData.image);
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const response = await templatesAPI.getCategories();
+                if (!cancelled) setCategories(response.categories || []);
+            } catch {
+                /* non-fatal */
             }
-            
-            await templatesAPI.updateTemplate(selectedTemplate._id, formDataToSend);
-            setSuccess('Template updated successfully!');
-            setEditDialogOpen(false);
-            resetForm();
-            loadTemplates();
-        } catch (error) {
-            setError(error.message || 'Failed to update template');
-        } finally {
-            setLoading(false);
-        }
-    };
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
-    const handleDeleteTemplate = async () => {
-        try {
-            setLoading(true);
-            await templatesAPI.deleteTemplate(selectedTemplate._id);
-            setSuccess('Template deleted successfully!');
-            setDeleteDialogOpen(false);
-            setSelectedTemplate(null);
-            loadTemplates();
-        } catch (error) {
-            setError(error.message || 'Failed to delete template');
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    // --------------------------------------------------------------- actions
     const resetForm = () => {
-        setFormData({
-            name: '',
-            category: 'general',
-            description: '',
-            isPublic: false,
-            image: null
-        });
+        setFormData(emptyForm);
         setSelectedTemplate(null);
+    };
+
+    const buildFormData = () => {
+        const fd = new FormData();
+        fd.append('name', formData.name);
+        fd.append('category', formData.category);
+        fd.append('description', formData.description);
+        fd.append('isPublic', formData.isPublic);
+        if (formData.image) fd.append('image', formData.image);
+        return fd;
+    };
+
+    const handleCreate = async () => {
+        try {
+            await templatesAPI.createTemplate(buildFormData());
+            setSuccess('Template created successfully.');
+            setCreateOpen(false);
+            resetForm();
+            // Bump filters to trigger refetch
+            setPage((p) => (p === 1 ? 1 : 1));
+            setSelectedCategory((c) => c);
+        } catch (e) {
+            setError(e.message || 'Failed to create template');
+        }
+    };
+
+    const handleUpdate = async () => {
+        if (!selectedTemplate) return;
+        try {
+            await templatesAPI.updateTemplate(selectedTemplate._id, buildFormData());
+            setSuccess('Template updated.');
+            setEditOpen(false);
+            resetForm();
+            setPage((p) => p);
+        } catch (e) {
+            setError(e.message || 'Failed to update template');
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!selectedTemplate) return;
+        try {
+            await templatesAPI.deleteTemplate(selectedTemplate._id);
+            setSuccess('Template deleted.');
+            setDeleteOpen(false);
+            resetForm();
+            setPage((p) => p);
+        } catch (e) {
+            setError(e.message || 'Failed to delete template');
+        }
     };
 
     const openEditDialog = (template) => {
@@ -230,669 +204,481 @@ const TemplateManager = () => {
             category: template.category,
             description: template.description || '',
             isPublic: template.isPublic,
-            image: null
+            image: null,
         });
-        setEditDialogOpen(true);
+        setEditOpen(true);
     };
 
     const openDeleteDialog = (template) => {
         setSelectedTemplate(template);
-        setDeleteDialogOpen(true);
+        setDeleteOpen(true);
     };
 
     const handleImageChange = (event) => {
         const file = event.target.files[0];
-        if (file) {
-            if (file.size > 10 * 1024 * 1024) {
-                setError('File size must be less than 10MB');
-                return;
-            }
-            setFormData({ ...formData, image: file });
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+            setError('File size must be less than 10MB.');
+            return;
         }
+        setFormData((prev) => ({ ...prev, image: file }));
     };
 
-    const handleMenuClick = (event, template) => {
-        setAnchorEl(event.currentTarget);
-        setSelectedTemplate(template);
-    };
+    const canEdit = (template) =>
+        user && template?.creator && template.creator._id === user._id;
 
-    const handleMenuClose = () => {
-        setAnchorEl(null);
-        setSelectedTemplate(null);
-    };
-
-    const canEditTemplate = (template) => {
-        return template.creator._id === user._id;
-    };
-
-    return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-            py: 4,
-        }}>
-            <Container maxWidth="xl">
-                <Fade in={true} timeout={1000}>
-                    <Box>
-                        {/* Enhanced Header */}
-                        <Zoom in={true} timeout={1200}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    p: 4,
-                                    mb: 4,
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                    backdropFilter: 'blur(50px)',
-                                    WebkitBackdropFilter: 'blur(50px)',
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.3)'
-                                        : '2px solid rgba(0, 0, 0, 0.15)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.4)'
-                                        : '3px solid rgba(0, 0, 0, 0.2)',
-                                    borderRadius: '24px',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                        : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    transition: 'all 0.3s ease',
-                                    '&:hover': {
-                                        transform: 'translateY(-2px)',
-                                        background: mode === 'dark'
-                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                        border: mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.4)'
-                                            : '2px solid rgba(0, 0, 0, 0.25)',
-                                        borderTop: mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.5)'
-                                            : '3px solid rgba(0, 0, 0, 0.3)',
-                                        boxShadow: mode === 'dark'
-                                            ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                            : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                    },
-                                    '&::before': {
-                                        content: '""',
-                                        position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: '4px',
-                                        background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                    },
-                                }}
-                            >
-                                <Box sx={{ position: 'relative', textAlign: 'center', width: '100%' }}>
-                                    <Box sx={{ textAlign: 'center' }}>
-                                        <Typography 
-                                            variant="h3" 
-                                            component="h1" 
-                                            sx={{
-                                                fontWeight: 800,
-                                                mb: 2,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                gap: 1.5
-                                            }}
-                                        >
-                                            {/* Artist Palette Emoji - Separate for Natural Colors */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    fontSize: 'inherit',
-                                                    filter: 'hue-rotate(0deg) saturate(1.1) brightness(1.05)',
-                                                    '&:hover': {
-                                                        transform: 'scale(1.1) rotate(-10deg)',
-                                                        transition: 'transform 0.3s ease',
-                                                    },
-                                                }}
-                                            >
-                                                🎨
-                                            </Box>
-                                            
-                                            {/* Meme Templates Text with Gradient */}
-                                            <Box
-                                                component="span"
-                                                sx={{
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#ec4899'} 100%)`,
-                                                    backgroundClip: 'text',
-                                                    WebkitBackgroundClip: 'text',
-                                                    color: 'transparent',
-                                                    // Fallback for browsers that don't support background-clip
-                                                    '@supports not (-webkit-background-clip: text)': {
-                                                        background: 'none',
-                                                        color: currentThemeColors?.primary || '#6366f1',
-                                                    },
-                                                }}
-                                            >
-                                                Meme Templates
-                                            </Box>
-                                        </Typography>
-                                        <Typography 
-                                            variant="h6" 
-                                            sx={{ 
-                                                color: theme.palette.text.secondary,
-                                                fontWeight: 500,
-                                            }}
-                                        >
-                                            Create and manage your meme templates collection
-                                        </Typography>
-                                    </Box>
-                                    
-                                    {/* Absolutely positioned Fab button */}
-                                    <Box sx={{ position: 'absolute', top: 0, right: 0 }}>
-                                        <Fab
-                                            color="primary"
-                                            aria-label="add"
-                                            onClick={() => setCreateDialogOpen(true)}
-                                            sx={{
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 100%)`,
-                                                boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                                '&:hover': {
-                                                    background: `linear-gradient(135deg, ${currentThemeColors?.primaryHover || '#5b21b6'} 0%, ${currentThemeColors?.secondaryHover || '#7c3aed'} 100%)`,
-                                                    transform: 'translateY(-2px)',
-                                                    boxShadow: `0 12px 40px ${currentThemeColors?.primary || '#6366f1'}60`,
-                                                },
-                                            }}
-                                        >
-                                            <AddIcon />
-                                        </Fab>
-                                    </Box>
-                                </Box>
-                            </Paper>
-                        </Zoom>
-
-                        {/* Main Content Card */}
-                        <Paper
-                            elevation={0}
-                            sx={{
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                backdropFilter: 'blur(50px)',
-                                WebkitBackdropFilter: 'blur(50px)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.3)'
-                                    : '2px solid rgba(0, 0, 0, 0.15)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.4)'
-                                    : '3px solid rgba(0, 0, 0, 0.2)',
-                                borderRadius: '20px',
-                                boxShadow: mode === 'dark'
-                                    ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                    : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                p: 4,
-                                transition: 'all 0.3s ease',
-                                '&:hover': {
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.4)'
-                                        : '2px solid rgba(0, 0, 0, 0.25)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.5)'
-                                        : '3px solid rgba(0, 0, 0, 0.3)',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                        : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                },
-                            }}
-                        >
-            {/* Alerts */}
-            {error && (
-                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-                    {error}
-                </Alert>
-            )}
-            {success && (
-                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
-                    {success}
-                </Alert>
-            )}
-
-            {/* Filters */}
-            <Box sx={{ mb: 3 }}>
-                <Grid container spacing={2} alignItems="center">
-                    <Grid item xs={12} sm={6} md={3}>
-                        <TextField
-                            fullWidth
-                            placeholder="Search templates..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            InputProps={{
-                                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                            }}
-                        />
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                        <FormControl fullWidth>
-                            <InputLabel>Category</InputLabel>
-                            <Select
-                                value={selectedCategory}
-                                onChange={(e) => setSelectedCategory(e.target.value)}
-                                label="Category"
-                            >
-                                <MenuItem value="all">All Categories</MenuItem>
-                                {categories.map((category) => (
-                                    <MenuItem key={category} value={category}>
-                                        {category.charAt(0).toUpperCase() + category.slice(1)}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    checked={showMyTemplates}
-                                    onChange={(e) => setShowMyTemplates(e.target.checked)}
-                                />
-                            }
-                            label="My Templates Only"
-                        />
-                    </Grid>
-                </Grid>
+    // -------------------------------------------------------------- rendering
+    const renderCard = (template) => (
+        <Box
+            sx={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 3,
+                border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                background: theme.palette.background.paper,
+                boxShadow: theme.tokens?.shadow?.sm,
+                overflow: 'hidden',
+                transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                '&:hover': {
+                    transform: 'translate(-2px, -2px)',
+                    boxShadow: theme.tokens?.shadow?.md,
+                },
+            }}
+        >
+            <Box
+                sx={{
+                    position: 'relative',
+                    aspectRatio: '1 / 1',
+                    background: theme.palette.brand?.surfaceSubtle || theme.palette.action.hover,
+                    borderBottom: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                }}
+            >
+                <img
+                    src={getImageUrl(template.imageUrl)}
+                    alt={template.name}
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block',
+                    }}
+                />
+                {canEdit(template) && (
+                    <IconButton
+                        size="small"
+                        onClick={(e) => {
+                            setAnchorEl(e.currentTarget);
+                            setSelectedTemplate(template);
+                        }}
+                        sx={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            background: theme.palette.background.paper,
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            '&:hover': { background: theme.palette.background.paper },
+                        }}
+                    >
+                        <MoreVertIcon fontSize="small" />
+                    </IconButton>
+                )}
             </Box>
 
-            {/* Templates Grid */}
-            {loading ? (
-                <Box display="flex" justifyContent="center" my={4}>
-                    <CircularProgress />
+            <Box sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                <Typography sx={{ fontWeight: 900, fontSize: '1rem' }} noWrap>
+                    {template.name}
+                </Typography>
+                <Typography
+                    variant="body2"
+                    sx={{
+                        color: theme.palette.text.secondary,
+                        mb: 1.5,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        minHeight: 36,
+                    }}
+                >
+                    {template.description || 'No description'}
+                </Typography>
+
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+                    <Chip
+                        icon={<CategoryIcon />}
+                        label={template.category}
+                        size="small"
+                        sx={{ fontWeight: 700, textTransform: 'capitalize' }}
+                    />
+                    {template.isPublic ? (
+                        <Chip
+                            icon={<VisibilityIcon />}
+                            label="Public"
+                            size="small"
+                            color="success"
+                            sx={{ fontWeight: 700 }}
+                        />
+                    ) : (
+                        <Chip
+                            icon={<VisibilityOffIcon />}
+                            label="Private"
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontWeight: 700 }}
+                        />
+                    )}
+                </Stack>
+
+                <Box
+                    sx={{
+                        mt: 'auto',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        pt: 1,
+                        borderTop: `1px dashed ${theme.palette.brand?.border || theme.palette.divider}`,
+                    }}
+                >
+                    <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                        Used {template.usageCount || 0}×
+                    </Typography>
+                    <Typography
+                        variant="caption"
+                        sx={{ color: theme.palette.text.secondary }}
+                        noWrap
+                    >
+                        @{template.creator?.username || 'unknown'}
+                    </Typography>
                 </Box>
-            ) : (
-                <>
+
+                <Button
+                    fullWidth
+                    size="small"
+                    variant="contained"
+                    onClick={() =>
+                        window.open(`/meme-creator?template=${template._id}`, '_blank')
+                    }
+                    sx={{ mt: 1.5, fontWeight: 800 }}
+                >
+                    Use Template
+                </Button>
+            </Box>
+        </Box>
+    );
+
+    const renderDialogBody = (isEdit) => (
+        <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+                fullWidth
+                label="Template name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                required
+            />
+            <FormControl fullWidth>
+                <InputLabel>Category</InputLabel>
+                <Select
+                    value={formData.category}
+                    label="Category"
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                >
+                    {(categories.length ? categories : ['general']).map((cat) => (
+                        <MenuItem key={cat} value={cat} sx={{ textTransform: 'capitalize' }}>
+                            {cat}
+                        </MenuItem>
+                    ))}
+                </Select>
+            </FormControl>
+            <TextField
+                fullWidth
+                label="Description"
+                multiline
+                rows={3}
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+            <FormControlLabel
+                control={
+                    <Switch
+                        checked={formData.isPublic}
+                        onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
+                    />
+                }
+                label="Make this template public"
+            />
+            <Button
+                variant="outlined"
+                component="label"
+                startIcon={<CloudUploadIcon />}
+                fullWidth
+                sx={{ fontWeight: 800 }}
+            >
+                {isEdit ? 'Replace image (optional)' : 'Upload template image'}
+                <input type="file" hidden accept="image/*" onChange={handleImageChange} />
+            </Button>
+            {formData.image && (
+                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                    Selected: {formData.image.name}
+                </Typography>
+            )}
+        </Stack>
+    );
+
+    return (
+        <Box>
+            <PageHeader
+                eyebrow="TEMPLATES"
+                title="Your template library"
+                subtitle="Upload, edit, and share the starting points for every meme you make."
+                icon={<CollectionsIcon />}
+                actions={
+                    user && (
+                        <Button
+                            variant="contained"
+                            size="large"
+                            startIcon={<AddIcon />}
+                            onClick={() => {
+                                resetForm();
+                                setCreateOpen(true);
+                            }}
+                            sx={{ fontWeight: 900 }}
+                        >
+                            New template
+                        </Button>
+                    )
+                }
+            />
+
+            <Container maxWidth="xl" sx={{ py: 4 }}>
+                {error && (
+                    <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
+                        {error}
+                    </Alert>
+                )}
+                {success && (
+                    <Alert severity="success" onClose={() => setSuccess('')} sx={{ mb: 2 }}>
+                        {success}
+                    </Alert>
+                )}
+
+                <Box
+                    sx={{
+                        p: { xs: 2, md: 3 },
+                        mb: 4,
+                        borderRadius: 3,
+                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                        background: theme.palette.background.paper,
+                        boxShadow: theme.tokens?.shadow?.sm,
+                    }}
+                >
+                    <Grid container spacing={2} alignItems="center">
+                        <Grid item xs={12} md={5}>
+                            <TextField
+                                fullWidth
+                                placeholder="Search templates…"
+                                value={searchTerm}
+                                onChange={(e) => {
+                                    setSearchTerm(e.target.value);
+                                    setPage(1);
+                                }}
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon />
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                        </Grid>
+                        <Grid item xs={12} sm={6} md={4}>
+                            <FormControl fullWidth>
+                                <InputLabel>Category</InputLabel>
+                                <Select
+                                    value={selectedCategory}
+                                    label="Category"
+                                    onChange={(e) => {
+                                        setSelectedCategory(e.target.value);
+                                        setPage(1);
+                                    }}
+                                >
+                                    <MenuItem value="all">All categories</MenuItem>
+                                    {categories.map((cat) => (
+                                        <MenuItem key={cat} value={cat} sx={{ textTransform: 'capitalize' }}>
+                                            {cat}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={3}>
+                            {user && (
+                                <FormControlLabel
+                                    control={
+                                        <Switch
+                                            checked={showMine}
+                                            onChange={(e) => {
+                                                setShowMine(e.target.checked);
+                                                setPage(1);
+                                            }}
+                                        />
+                                    }
+                                    label="My templates"
+                                />
+                            )}
+                        </Grid>
+                    </Grid>
+                </Box>
+
+                {loading ? (
                     <Grid container spacing={3}>
-                        {templates.map((template) => (
-                            <Grid item xs={12} sm={6} md={4} lg={3} key={template._id}>
-                                <Card sx={{ 
-                                    height: '100%', 
-                                    display: 'flex', 
-                                    flexDirection: 'column',
-                                    background: mode === 'dark'
-                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                    backdropFilter: 'blur(40px)',
-                                    WebkitBackdropFilter: 'blur(40px)',
-                                    border: mode === 'dark'
-                                        ? '2px solid rgba(255, 255, 255, 0.3)'
-                                        : '2px solid rgba(0, 0, 0, 0.15)',
-                                    borderTop: mode === 'dark'
-                                        ? '3px solid rgba(255, 255, 255, 0.4)'
-                                        : '3px solid rgba(0, 0, 0, 0.2)',
-                                    borderRadius: '16px',
-                                    boxShadow: mode === 'dark'
-                                        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                        : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                    transition: 'all 0.3s ease',
-                                    cursor: 'pointer',
-                                    '&:hover': {
-                                        transform: 'translateY(-4px)',
-                                        background: mode === 'dark'
-                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                        border: mode === 'dark'
-                                            ? '2px solid rgba(255, 255, 255, 0.4)'
-                                            : '2px solid rgba(0, 0, 0, 0.25)',
-                                        borderTop: mode === 'dark'
-                                            ? '3px solid rgba(255, 255, 255, 0.5)'
-                                            : '3px solid rgba(0, 0, 0, 0.3)',
-                                        boxShadow: mode === 'dark'
-                                            ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                            : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                    },
-                                }}>
-                                    <CardMedia
-                                        component="img"
-                                        height="200"
-                                        image={getImageUrl(template.imageUrl)}
-                                        alt={template.name}
-                                        sx={{ objectFit: 'cover' }}
-                                    />
-                                    <CardContent sx={{ flexGrow: 1 }}>
-                                        <Typography variant="h6" gutterBottom noWrap>
-                                            {template.name}
-                                        </Typography>
-                                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                                            {template.description || 'No description'}
-                                        </Typography>
-                                        <Box display="flex" alignItems="center" gap={1} mt={1}>
-                                            <Chip
-                                                label={template.category}
-                                                size="small"
-                                                icon={<CategoryIcon />}
-                                                sx={{
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                    backdropFilter: 'blur(20px)',
-                                                    WebkitBackdropFilter: 'blur(20px)',
-                                                    border: mode === 'dark'
-                                                        ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                        : '1px solid rgba(0, 0, 0, 0.2)',
-                                                    color: mode === 'dark' ? 'white' : 'black',
-                                                    fontWeight: 700,
-                                                    fontSize: '0.75rem',
-                                                    boxShadow: mode === 'dark'
-                                                        ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                        : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                }}
-                                            />
-                                            {template.isPublic ? (
-                                                <Chip
-                                                    label="Public"
-                                                    size="small"
-                                                    color="success"
-                                                    icon={<VisibilityIcon />}
-                                                    sx={{
-                                                        background: mode === 'dark'
-                                                            ? 'linear-gradient(145deg, rgba(0, 120, 0, 0.3) 0%, rgba(0, 100, 0, 0.1) 100%)'
-                                                            : 'linear-gradient(145deg, rgba(76, 175, 80, 0.8) 0%, rgba(76, 175, 80, 0.4) 100%)',
-                                                        backdropFilter: 'blur(20px)',
-                                                        WebkitBackdropFilter: 'blur(20px)',
-                                                        border: mode === 'dark'
-                                                            ? '1px solid rgba(76, 175, 80, 0.5)'
-                                                            : '1px solid rgba(76, 175, 80, 0.3)',
-                                                        color: mode === 'dark' ? '#4caf50' : 'white',
-                                                        fontWeight: 700,
-                                                        fontSize: '0.75rem',
-                                                        boxShadow: mode === 'dark'
-                                                            ? 'inset 0 1px 0 rgba(76, 175, 80, 0.3)'
-                                                            : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                    }}
-                                                />
-                                            ) : (
-                                                <Chip
-                                                    label="Private"
-                                                    size="small"
-                                                    color="default"
-                                                    icon={<VisibilityOffIcon />}
-                                                    sx={{
-                                                        background: mode === 'dark'
-                                                            ? 'linear-gradient(145deg, rgba(120, 120, 120, 0.3) 0%, rgba(100, 100, 100, 0.1) 100%)'
-                                                            : 'linear-gradient(145deg, rgba(158, 158, 158, 0.8) 0%, rgba(158, 158, 158, 0.4) 100%)',
-                                                        backdropFilter: 'blur(20px)',
-                                                        WebkitBackdropFilter: 'blur(20px)',
-                                                        border: mode === 'dark'
-                                                            ? '1px solid rgba(158, 158, 158, 0.5)'
-                                                            : '1px solid rgba(158, 158, 158, 0.3)',
-                                                        color: mode === 'dark' ? '#9e9e9e' : 'white',
-                                                        fontWeight: 700,
-                                                        fontSize: '0.75rem',
-                                                        boxShadow: mode === 'dark'
-                                                            ? 'inset 0 1px 0 rgba(158, 158, 158, 0.3)'
-                                                            : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                    }}
-                                                />
-                                            )}
-                                        </Box>
-                                        <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                                            Used {template.usageCount} times
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary">
-                                            by {template.creator.username}
-                                        </Typography>
-                                    </CardContent>
-                                    <CardActions>
-                                        <Button
-                                            size="small"
-                                            onClick={() => window.open(`/meme-creator?template=${template._id}`, '_blank')}
-                                        >
-                                            Use Template
-                                        </Button>
-                                        {canEditTemplate(template) && (
-                                            <IconButton
-                                                size="small"
-                                                onClick={(e) => handleMenuClick(e, template)}
-                                            >
-                                                <MoreVertIcon />
-                                            </IconButton>
-                                        )}
-                                    </CardActions>
-                                </Card>
+                        {Array.from({ length: 8 }).map((_, i) => (
+                            <Grid item xs={12} sm={6} md={4} lg={3} key={i}>
+                                <SkeletonCard />
                             </Grid>
                         ))}
                     </Grid>
+                ) : templates.length === 0 ? (
+                    <EmptyState
+                        icon={<CollectionsIcon sx={{ fontSize: 48 }} />}
+                        title="No templates yet"
+                        description={
+                            showMine
+                                ? 'Upload your first template to get started.'
+                                : 'Try a different search or category — or add one yourself.'
+                        }
+                        action={
+                            user && (
+                                <Button
+                                    variant="contained"
+                                    startIcon={<AddIcon />}
+                                    onClick={() => {
+                                        resetForm();
+                                        setCreateOpen(true);
+                                    }}
+                                >
+                                    New template
+                                </Button>
+                            )
+                        }
+                    />
+                ) : (
+                    <>
+                        <Grid container spacing={3}>
+                            {templates.map((t) => (
+                                <Grid item xs={12} sm={6} md={4} lg={3} key={t._id}>
+                                    {renderCard(t)}
+                                </Grid>
+                            ))}
+                        </Grid>
 
-                    {/* Pagination */}
-                    {totalPages > 1 && (
-                        <Box display="flex" justifyContent="center" mt={4}>
-                            <Button
-                                disabled={page === 1}
-                                onClick={() => setPage(page - 1)}
-                                sx={{ mr: 2 }}
-                            >
-                                Previous
-                            </Button>
-                            <Typography variant="body1" sx={{ mx: 2, alignSelf: 'center' }}>
-                                Page {page} of {totalPages}
-                            </Typography>
-                            <Button
-                                disabled={!hasNext}
-                                onClick={() => setPage(page + 1)}
-                                sx={{ ml: 2 }}
-                            >
-                                Next
-                            </Button>
-                        </Box>
-                    )}
-                </>
-            )}
+                        {totalPages > 1 && (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                                <Pagination
+                                    count={totalPages}
+                                    page={page}
+                                    onChange={(_, p) => setPage(p)}
+                                    color="primary"
+                                    size="large"
+                                />
+                            </Box>
+                        )}
+                    </>
+                )}
+            </Container>
 
-            {/* Context Menu */}
             <Menu
                 anchorEl={anchorEl}
                 open={Boolean(anchorEl)}
-                onClose={handleMenuClose}
+                onClose={() => setAnchorEl(null)}
             >
-                <MenuItem onClick={() => { openEditDialog(selectedTemplate); handleMenuClose(); }}>
+                <MenuItem
+                    onClick={() => {
+                        openEditDialog(selectedTemplate);
+                        setAnchorEl(null);
+                    }}
+                >
                     <ListItemIcon>
                         <EditIcon fontSize="small" />
                     </ListItemIcon>
-                    <ListItemText>Edit Template</ListItemText>
+                    <ListItemText>Edit template</ListItemText>
                 </MenuItem>
-                <MenuItem onClick={() => { openDeleteDialog(selectedTemplate); handleMenuClose(); }}>
+                <MenuItem
+                    onClick={() => {
+                        openDeleteDialog(selectedTemplate);
+                        setAnchorEl(null);
+                    }}
+                >
                     <ListItemIcon>
-                        <DeleteIcon fontSize="small" />
+                        <DeleteIcon fontSize="small" color="error" />
                     </ListItemIcon>
-                    <ListItemText>Delete Template</ListItemText>
+                    <ListItemText sx={{ color: 'error.main' }}>Delete template</ListItemText>
                 </MenuItem>
             </Menu>
 
-            {/* Create Template Dialog */}
-            <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Create New Template</DialogTitle>
-                <DialogContent>
-                    <Box sx={{ mt: 2 }}>
-                        <TextField
-                            fullWidth
-                            label="Template Name"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            sx={{ mb: 2 }}
-                            required
-                        />
-                        <FormControl fullWidth sx={{ mb: 2 }}>
-                            <InputLabel>Category</InputLabel>
-                            <Select
-                                value={formData.category}
-                                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                label="Category"
-                            >
-                                {categories.map((category) => (
-                                    <MenuItem key={category} value={category}>
-                                        {category.charAt(0).toUpperCase() + category.slice(1)}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <TextField
-                            fullWidth
-                            label="Description"
-                            multiline
-                            rows={3}
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            sx={{ mb: 2 }}
-                        />
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    checked={formData.isPublic}
-                                    onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
-                                />
-                            }
-                            label="Make template public"
-                            sx={{ mb: 2 }}
-                        />
-                        <Button
-                            variant="outlined"
-                            component="label"
-                            startIcon={<CloudUploadIcon />}
-                            fullWidth
-                            sx={{ mb: 2 }}
-                        >
-                            Upload Template Image
-                            <input
-                                type="file"
-                                hidden
-                                accept="image/*"
-                                onChange={handleImageChange}
-                            />
-                        </Button>
-                        {formData.image && (
-                            <Typography variant="body2" color="text.secondary">
-                                Selected: {formData.image.name}
-                            </Typography>
-                        )}
-                    </Box>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setCreateDialogOpen(false)}>
-                        Cancel
-                    </Button>
+            <Dialog
+                open={createOpen}
+                onClose={() => setCreateOpen(false)}
+                maxWidth="sm"
+                fullWidth
+            >
+                <DialogTitle sx={{ fontWeight: 900 }}>Create template</DialogTitle>
+                <DialogContent>{renderDialogBody(false)}</DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
                     <Button
-                        onClick={handleCreateTemplate}
+                        onClick={handleCreate}
                         variant="contained"
                         disabled={!formData.name || !formData.image}
+                        sx={{ fontWeight: 800 }}
                     >
-                        Create Template
+                        Create template
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Edit Template Dialog */}
-            <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Edit Template</DialogTitle>
-                <DialogContent>
-                    <Box sx={{ mt: 2 }}>
-                        <TextField
-                            fullWidth
-                            label="Template Name"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            sx={{ mb: 2 }}
-                            required
-                        />
-                        <FormControl fullWidth sx={{ mb: 2 }}>
-                            <InputLabel>Category</InputLabel>
-                            <Select
-                                value={formData.category}
-                                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                label="Category"
-                            >
-                                {categories.map((category) => (
-                                    <MenuItem key={category} value={category}>
-                                        {category.charAt(0).toUpperCase() + category.slice(1)}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <TextField
-                            fullWidth
-                            label="Description"
-                            multiline
-                            rows={3}
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            sx={{ mb: 2 }}
-                        />
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    checked={formData.isPublic}
-                                    onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
-                                />
-                            }
-                            label="Make template public"
-                            sx={{ mb: 2 }}
-                        />
-                        <Button
-                            variant="outlined"
-                            component="label"
-                            startIcon={<CloudUploadIcon />}
-                            fullWidth
-                            sx={{ mb: 2 }}
-                        >
-                            Upload New Image (Optional)
-                            <input
-                                type="file"
-                                hidden
-                                accept="image/*"
-                                onChange={handleImageChange}
-                            />
-                        </Button>
-                        {formData.image && (
-                            <Typography variant="body2" color="text.secondary">
-                                New image: {formData.image.name}
-                            </Typography>
-                        )}
-                    </Box>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setEditDialogOpen(false)}>
-                        Cancel
-                    </Button>
+            <Dialog
+                open={editOpen}
+                onClose={() => setEditOpen(false)}
+                maxWidth="sm"
+                fullWidth
+            >
+                <DialogTitle sx={{ fontWeight: 900 }}>Edit template</DialogTitle>
+                <DialogContent>{renderDialogBody(true)}</DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setEditOpen(false)}>Cancel</Button>
                     <Button
-                        onClick={handleUpdateTemplate}
+                        onClick={handleUpdate}
                         variant="contained"
                         disabled={!formData.name}
+                        sx={{ fontWeight: 800 }}
                     >
-                        Update Template
+                        Save changes
                     </Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Delete Confirmation Dialog */}
-            <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-                <DialogTitle>Delete Template</DialogTitle>
+            <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)}>
+                <DialogTitle sx={{ fontWeight: 900 }}>Delete template?</DialogTitle>
                 <DialogContent>
                     <Typography>
-                        Are you sure you want to delete "{selectedTemplate?.name}"? This action cannot be undone.
+                        Are you sure you want to delete{' '}
+                        <strong>"{selectedTemplate?.name}"</strong>? This action cannot be
+                        undone.
                     </Typography>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setDeleteDialogOpen(false)}>
-                        Cancel
-                    </Button>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setDeleteOpen(false)}>Cancel</Button>
                     <Button
-                        onClick={handleDeleteTemplate}
+                        onClick={handleDelete}
                         color="error"
                         variant="contained"
+                        sx={{ fontWeight: 800 }}
                     >
                         Delete
                     </Button>
                 </DialogActions>
             </Dialog>
-                        </Paper>
-                    </Box>
-                </Fade>
-            </Container>
         </Box>
     );
 };

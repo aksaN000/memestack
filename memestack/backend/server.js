@@ -1,7 +1,9 @@
 // 🚀 MemeStack Backend Server
-// This is the main entry point of our application
+// Entry point for local development (`npm run dev`) and the Vercel
+// serverless handler alike. The Express app itself is exported so
+// `api/index.js` (serverless entry) can wrap it without booting another
+// HTTP listener on Vercel.
 
-// Import required packages
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -11,6 +13,32 @@ const path = require('path');
 // Load environment variables from .env file
 dotenv.config();
 
+// ========================================
+// ENV VALIDATION (fail-fast in production)
+// ========================================
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const isProd = NODE_ENV === 'production';
+
+// JWT_SECRET is load-bearing — without it tokens are forgeable.
+if (!process.env.JWT_SECRET) {
+    if (isProd) {
+        console.error('❌ FATAL: JWT_SECRET is not set. Refusing to start in production.');
+        process.exit(1);
+    } else {
+        console.warn('⚠️  JWT_SECRET is not set. Using an insecure dev fallback. Do NOT deploy without setting it.');
+        process.env.JWT_SECRET = 'dev-only-insecure-secret-please-override-me';
+    }
+} else if (isProd && process.env.JWT_SECRET.length < 32) {
+    console.error('❌ FATAL: JWT_SECRET must be at least 32 characters in production.');
+    process.exit(1);
+}
+
+// MONGODB_URI must exist in production — no in-memory fallback.
+if (isProd && !process.env.MONGODB_URI) {
+    console.error('❌ FATAL: MONGODB_URI is required in production. Refusing to start.');
+    process.exit(1);
+}
+
 // Create Express application instance
 const app = express();
 
@@ -18,353 +46,243 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ========================================
-// INITIAL DATA SETUP
-// ========================================
-
-const createInitialData = async () => {
-    try {
-        // Create test data for development/testing
-        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-            const { createTestData } = require('./utils/testData');
-            await createTestData();
-        }
-        console.log('🚀 Server started successfully');
-    } catch (error) {
-        console.error('❌ Error during startup:', error.message);
-    }
-};
-
-// ========================================
 // MIDDLEWARE SETUP
 // ========================================
 
-// Security middleware for production
-if (process.env.NODE_ENV === 'production') {
-    // Add security headers
+// Trust proxy (needed for accurate IPs on Vercel, Render, etc.)
+app.set('trust proxy', 1);
+
+// Security headers (applied in every env)
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+});
+
+// CORS — accept a comma-separated list of allowed origins in prod.
+// CLIENT_URL may be "https://a.com,https://b.com" for multi-origin setups.
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000,http://127.0.0.1:3000')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin: (origin, cb) => {
+        // allow same-origin (no origin header) and explicit allowlist
+        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        // Allow *.vercel.app preview deployments if any allowed origin is vercel.app
+        if (/^https:\/\/[\w-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+        return cb(new Error(`CORS: origin ${origin} not allowed`), false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Parse JSON + URL-encoded bodies
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Dev-only request logging
+if (!isProd) {
     app.use((req, res, next) => {
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('X-Frame-Options', 'DENY');
-        res.setHeader('X-XSS-Protection', '1; mode=block');
-        res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+        console.log(`🌐 ${req.method} ${req.originalUrl}`);
         next();
     });
 }
 
-// Enable CORS (Cross-Origin Resource Sharing)
-app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? process.env.CLIENT_URL 
-        : ['http://localhost:3000', 'http://127.0.0.1:3000'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Parse JSON requests (allows us to receive JSON data)
-app.use(express.json({ limit: '10mb' }));
-
-// Parse URL-encoded data (for form submissions)
-app.use(express.urlencoded({ extended: true }));
-
-// Production request logging middleware
-app.use((req, res, next) => {
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`🌐 ${req.method} ${req.originalUrl}`);
-    }
-    next();
-});
-
-// Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve static files from uploads directory (dev only — on Vercel this
+// directory is ephemeral and all uploads should go to Cloudinary)
+if (!isProd) {
+    app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+}
 
 // ========================================
-// DATABASE CONNECTION
+// DATABASE CONNECTION (serverless-safe)
 // ========================================
 
-// Connect to MongoDB
+let cachedConnection = null;
+
 const connectDB = async () => {
-    try {
-        console.log('🔄 Connecting to MongoDB...');
-        
-        // Priority 1: MongoDB Atlas (Production)
-        if (process.env.MONGODB_URI && process.env.MONGODB_URI.includes('mongodb+srv://')) {
-            console.log('🌐 Using MongoDB Atlas (Production)...');
-            const conn = await mongoose.connect(process.env.MONGODB_URI, {
-                retryWrites: true,
-                w: 'majority',
-                maxPoolSize: 10,
-                serverSelectionTimeoutMS: 5000,
-                socketTimeoutMS: 45000,
-            });
-            console.log(`✅ MongoDB Atlas Connected: ${conn.connection.host}`);
-            console.log(`📊 Database: ${conn.connection.name}`);
-            return;
-        }
-        
-        // Priority 2: Local MongoDB (Development)
-        if (process.env.MONGODB_URI && process.env.MONGODB_URI.includes('mongodb://localhost')) {
-            console.log('🏠 Using Local MongoDB (Development)...');
-            const conn = await mongoose.connect(process.env.MONGODB_URI);
-            console.log(`✅ Local MongoDB Connected: ${conn.connection.host}`);
-            console.log(`📊 Database: ${conn.connection.name}`);
-            await createInitialData();
-            return;
-        }
-        
-        // Priority 3: In-memory database (Testing only)
-        if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
-            console.log('🧪 Using in-memory database (Development/Testing)...');
-            const { MongoMemoryServer } = require('mongodb-memory-server');
-            
-            const mongod = new MongoMemoryServer({
-                instance: { dbName: 'memestack' }
-            });
-            
-            await mongod.start();
-            const uri = mongod.getUri();
-            
-            const conn = await mongoose.connect(uri);
-            console.log(`✅ In-Memory MongoDB Connected!`);
-            console.log(`📊 Database: ${conn.connection.name} (temporary)`);
-            console.log(`💡 Data will reset when server restarts`);
-            
-            // Store mongod instance for cleanup
-            global.mongod = mongod;
-            
-            // Create initial data for development
-            await createInitialData();
-            return;
-        }
-        
-        throw new Error('No valid MongoDB connection string found in environment variables');
-        
-    } catch (error) {
-        console.error('❌ MongoDB connection error:', error.message);
-        console.log('💡 Setup Instructions:');
-        console.log('   - For Production: Set MONGODB_URI to Atlas connection string');
-        console.log('   - For Development: Set MONGODB_URI to local MongoDB');
-        console.log('   - Check MONGODB_SETUP.md for detailed instructions');
-        process.exit(1);
+    if (cachedConnection && mongoose.connection.readyState === 1) {
+        return cachedConnection;
     }
+
+    // --- Atlas / hosted MongoDB ---
+    if (process.env.MONGODB_URI) {
+        console.log('🌐 Connecting to MongoDB via MONGODB_URI…');
+        cachedConnection = await mongoose.connect(process.env.MONGODB_URI, {
+            retryWrites: true,
+            w: 'majority',
+            maxPoolSize: 10,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
+        console.log(`✅ MongoDB connected: ${mongoose.connection.host} · db: ${mongoose.connection.name}`);
+        return cachedConnection;
+    }
+
+    // --- In-memory fallback — DEVELOPMENT ONLY ---
+    if (!isProd) {
+        console.log('🧪 No MONGODB_URI found — spinning up an in-memory Mongo for local dev.');
+        console.log('💡 Data will not persist between restarts.');
+        const { MongoMemoryServer } = require('mongodb-memory-server');
+        const mongod = new MongoMemoryServer({ instance: { dbName: 'memestack' } });
+        await mongod.start();
+        cachedConnection = await mongoose.connect(mongod.getUri());
+        global.__mongodMemoryServer = mongod;
+
+        // seed demo data so the UI isn't empty on first boot
+        try {
+            const { createTestData } = require('./utils/testData');
+            await createTestData();
+        } catch (err) {
+            console.warn('⚠️  Demo-data seeding skipped:', err.message);
+        }
+        return cachedConnection;
+    }
+
+    // Should never reach here — env validation above would have exited.
+    throw new Error('MONGODB_URI is required in production.');
 };
 
 // ========================================
 // ROUTES SETUP
 // ========================================
 
-// Basic health check route
+// Root + health check
 app.get('/', (req, res) => {
     res.json({
-        message: '🎭 Welcome to MemeStack API!',
-        status: 'Server is running',
-        version: '1.0.0',
-        endpoints: {
-            health: 'GET /',
-            auth: 'POST /api/auth/register, POST /api/auth/login',
-            memes: 'GET /api/memes, POST /api/memes',
-            upload: 'POST /api/upload/meme',
-            trending: 'GET /api/memes/trending',
-            help: 'GET /api/memes/help/routes'
-        }
+        name: 'MemeStack API',
+        status: 'ok',
+        version: '1.1.0',
+        docs: '/api/health',
     });
 });
 
-// API health check with detailed system info
 app.get('/api/health', (req, res) => {
-    const healthStatus = {
-        status: 'OK',
+    res.json({
+        status: 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV,
-        version: '1.0.0',
-        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+        environment: NODE_ENV,
+        version: '1.1.0',
+        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
         memory: {
             used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
-            total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
-        }
-    };
-    
-    // Add more details in development
-    if (process.env.NODE_ENV === 'development') {
-        healthStatus.details = {
-            platform: process.platform,
-            nodeVersion: process.version,
-            databaseName: mongoose.connection.name
-        };
-    }
-    
-    res.json(healthStatus);
+            total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
+        },
+    });
 });
 
-// Import and use route files
-console.log('📝 Loading routes...');
+// Mount feature routes
 app.use('/api/auth', require('./routes/auth'));
-console.log('✅ Auth routes loaded');
 app.use('/api/memes', require('./routes/memes'));
-console.log('✅ Memes routes loaded');
-app.use('/api/upload', require('./routes/upload-simple-clean')); // Clean upload routes
-console.log('✅ Upload routes loaded');
+app.use('/api/upload', require('./routes/upload-simple-clean'));
 app.use('/api/comments', require('./routes/comments'));
-console.log('✅ Comment routes loaded');
 app.use('/api/follows', require('./routes/follows'));
-console.log('✅ Follow routes loaded');
 app.use('/api/analytics', require('./routes/analytics'));
-console.log('✅ Analytics routes loaded');
 app.use('/api/moderation', require('./routes/moderation'));
-console.log('✅ Moderation routes loaded');
 app.use('/api/folders', require('./routes/folders'));
-console.log('✅ Folder routes loaded');
 app.use('/api/templates', require('./routes/templates'));
-console.log('✅ Template routes loaded');
 app.use('/api/users', require('./routes/users'));
-console.log('✅ User routes loaded');
-
-// ========================================
-// COLLABORATION FEATURE ROUTES
-// ========================================
 app.use('/api/challenges', require('./routes/challenges'));
-console.log('✅ Challenge routes loaded');
 app.use('/api/groups', require('./routes/groups'));
-console.log('✅ Group routes loaded');
 app.use('/api/collaborations', require('./routes/collaborations'));
-console.log('✅ Collaboration routes loaded');
 
 // ========================================
-// ERROR HANDLING MIDDLEWARE
+// ERROR HANDLING
 // ========================================
 
-// Handle 404 (Not Found) errors
+// 404 for unmatched paths
 app.use((req, res) => {
     res.status(404).json({
         success: false,
-        message: `Route ${req.originalUrl} not found`,
-        tip: 'Check the API documentation for available routes'
+        message: `Route ${req.method} ${req.originalUrl} not found`,
     });
 });
 
 // Global error handler
 app.use((error, req, res, next) => {
-    // Log error for debugging (in development) or monitoring (in production)
-    if (process.env.NODE_ENV === 'development') {
+    const status = error.status || error.statusCode || 500;
+
+    if (!isProd) {
         console.error('❌ Error:', error.message);
-        console.error('📍 Stack:', error.stack);
+        if (error.stack) console.error(error.stack);
     } else {
-        // In production, log errors to monitoring service
-        console.error('Production Error:', {
+        console.error('Production error:', {
             message: error.message,
             url: req.originalUrl,
             method: req.method,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         });
     }
-    
-    // Don't expose internal error details in production
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    
-    res.status(error.status || 500).json({
+
+    res.status(status).json({
         success: false,
-        message: isDevelopment ? error.message : 'Internal Server Error',
-        ...(isDevelopment && { 
-            stack: error.stack,
-            details: error.details 
-        })
+        message: isProd && status >= 500 ? 'Internal server error' : error.message,
+        ...(isProd ? {} : { stack: error.stack }),
     });
 });
 
 // ========================================
-// START SERVER
+// SERVERLESS-AWARE BOOT
 // ========================================
 
-const startServer = async () => {
+// On Vercel / any FaaS, we do NOT call app.listen — the platform handles
+// the HTTP socket for us. But we do need the DB connected before the
+// first request. We kick off the connection eagerly and also gate every
+// request on it completing (cached after the first call).
+
+const connectionPromise = connectDB().catch((err) => {
+    console.error('❌ MongoDB connection failed:', err.message);
+    if (isProd) process.exit(1);
+});
+
+// Ensure DB is connected before each request (serverless-safe, cheap once cached)
+app.use(async (req, res, next) => {
     try {
-        // Connect to database first
-        await connectDB();
-        
-        // Start the server
-        const server = app.listen(PORT, () => {
-            const isProduction = process.env.NODE_ENV === 'production';
-            
-            if (isProduction) {
-                console.log('🚀 MemeStack Production Server Started');
-                console.log(`📡 Port: ${PORT}`);
-                console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-                console.log(`📋 Health Check: /api/health`);
-            } else {
-                console.log('\n🎉 ===================================');
-                console.log(`🚀 MemeStack Development Server Started!`);
-                console.log(`📡 Port: ${PORT}`);
-                console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-                console.log(`🔗 Local URL: http://localhost:${PORT}`);
-                console.log(`📋 Health Check: http://localhost:${PORT}/api/health`);
-                console.log('🎉 ===================================\n');
-            }
-        });
-        
-        // Graceful shutdown setup
-        process.on('SIGTERM', () => gracefulShutdown(server));
-        process.on('SIGINT', () => gracefulShutdown(server));
-        
-    } catch (error) {
-        console.error('❌ Failed to start server:', error.message);
-        process.exit(1);
-    }
-};
-
-// ========================================
-// GRACEFUL SHUTDOWN
-// ========================================
-
-const gracefulShutdown = async (server) => {
-    console.log('\n🔄 Graceful shutdown initiated...');
-    
-    try {
-        // Stop accepting new connections
-        server.close(() => {
-            console.log('✅ HTTP server closed');
-        });
-        
-        // Close database connection
-        await mongoose.connection.close();
-        console.log('✅ Database connection closed');
-        
-        // Clean up in-memory database if it exists
-        if (global.mongod) {
-            await global.mongod.stop();
-            console.log('✅ In-memory database stopped');
+        if (mongoose.connection.readyState !== 1) {
+            await connectionPromise;
         }
-        
-        console.log('✅ Graceful shutdown completed');
-        process.exit(0);
-        
-    } catch (error) {
-        console.error('❌ Error during shutdown:', error.message);
-        process.exit(1);
-    }
-};
-
-// Handle graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\n🔄 Shutting down server gracefully...');
-    
-    try {
-        await mongoose.connection.close();
-        console.log('✅ Database connection closed');
-        
-        // Clean up in-memory database if it exists
-        if (global.mongod) {
-            await global.mongod.stop();
-            console.log('✅ In-memory database stopped');
-        }
-        
-        process.exit(0);
-    } catch (error) {
-        console.error('❌ Error during shutdown:', error.message);
-        process.exit(1);
+        next();
+    } catch (err) {
+        next(err);
     }
 });
 
-// Start the server
-startServer();
+// Only start an HTTP listener when run directly (`node server.js`).
+// On Vercel, `api/index.js` imports this module and never triggers listen().
+if (require.main === module) {
+    connectionPromise.then(() => {
+        const server = app.listen(PORT, () => {
+            console.log('\n🎉 ===================================');
+            console.log(`🚀 MemeStack server listening on :${PORT}`);
+            console.log(`🌍 Environment: ${NODE_ENV}`);
+            console.log(`📋 Health: http://localhost:${PORT}/api/health`);
+            console.log('🎉 ===================================\n');
+        });
 
-// Export app for testing purposes
+        const shutdown = async () => {
+            console.log('\n🔄 Shutting down gracefully…');
+            server.close(() => console.log('✅ HTTP server closed'));
+            try {
+                await mongoose.connection.close();
+                console.log('✅ Database connection closed');
+            } catch (err) {
+                console.error('⚠️  Error closing DB:', err.message);
+            }
+            if (global.__mongodMemoryServer) {
+                await global.__mongodMemoryServer.stop();
+                console.log('✅ In-memory Mongo stopped');
+            }
+            process.exit(0);
+        };
+        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+    });
+}
+
 module.exports = app;

@@ -1,85 +1,84 @@
-// ⚙️ Account Settings Page Component
-// Comprehensive account settings management
+// ============================================================================
+// AccountSettings — preferences + account + danger-zone links.
+// ----------------------------------------------------------------------------
+// Sections:
+//   1. Profile basics (username, displayName, email, bio) — quick inline edit.
+//   2. Preferences (theme mode, color scheme, notifications, language).
+//   3. Data & privacy (download data, danger zone).
+// The email field is read-only today — it's the account's identity. Profile
+// deletion routes to a future `/account/delete` flow if one is added later.
+// ============================================================================
 
 import React, { useState } from 'react';
 import {
-    Container,
-    Typography,
     Box,
-    Card,
-    CardContent,
-    TextField,
     Button,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    FormControlLabel,
-    Switch,
-    Alert,
-    Divider,
+    Container,
     Grid,
+    TextField,
+    MenuItem,
+    Switch,
+    FormControlLabel,
+    Alert,
+    Stack,
+    Typography,
+    Divider,
+    CircularProgress,
     IconButton,
-    Chip,
-    List,
-    ListItem,
-    ListItemText,
-    ListItemIcon,
-    ListItemSecondaryAction,
+    Tooltip,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Save as SaveIcon,
+    Person as PersonIcon,
+    Tune as TuneIcon,
+    Security as SecurityIcon,
     Brightness4 as DarkModeIcon,
     Brightness7 as LightModeIcon,
     Notifications as NotificationsIcon,
-    Security as SecurityIcon,
-    Palette as PaletteIcon,
-    Person as PersonIcon,
-    Email as EmailIcon,
     Language as LanguageIcon,
-    DataUsage as DataUsageIcon,
+    Palette as PaletteIcon,
+    DeleteOutline as DeleteIcon,
+    DownloadForOffline as DownloadIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
+import { PageHeader, Section, ColorSchemeSelector } from '../components/common';
+
+const LANGUAGES = [
+    { value: 'en', label: 'English' },
+    { value: 'es', label: 'Español' },
+    { value: 'fr', label: 'Français' },
+    { value: 'de', label: 'Deutsch' },
+    { value: 'pt', label: 'Português' },
+    { value: 'ja', label: '日本語' },
+];
 
 const AccountSettings = () => {
+    const theme = useTheme();
     const navigate = useNavigate();
     const { user, updateProfile } = useAuth();
     const { mode, toggleTheme } = useThemeMode();
 
-    const [formData, setFormData] = useState({
+    const [form, setForm] = useState({
         username: user?.username || '',
         displayName: user?.profile?.displayName || '',
-        email: user?.email || '',
         bio: user?.profile?.bio || '',
-        theme: user?.preferences?.theme || 'light',
         notifications: user?.preferences?.notifications !== false,
         emailNotifications: user?.preferences?.emailNotifications !== false,
         language: user?.preferences?.language || 'en',
-        dataUsage: user?.preferences?.dataUsage || 'standard',
     });
-
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
-    const handleInputChange = (e) => {
+    const change = (e) => {
         const { name, value, type, checked } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: type === 'checkbox' ? checked : value
-        }));
+        setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
         setError('');
         setSuccess('');
-    };
-
-    const handleThemeChange = (newTheme) => {
-        setFormData(prev => ({ ...prev, theme: newTheme }));
-        // Immediately apply theme change
-        if (newTheme !== mode) {
-            toggleTheme();
-        }
     };
 
     const handleSubmit = async (e) => {
@@ -87,264 +86,328 @@ const AccountSettings = () => {
         setLoading(true);
         setError('');
         setSuccess('');
-
         try {
-            console.log('💾 Updating account settings...');
-            const result = await updateProfile({
-                username: formData.username,
-                displayName: formData.displayName,
-                bio: formData.bio,
-                theme: formData.theme,
-                notifications: formData.notifications,
-                emailNotifications: formData.emailNotifications,
-                language: formData.language,
-                dataUsage: formData.dataUsage,
-            });
-            
-            if (result.success) {
-                setSuccess('Account settings updated successfully!');
-                console.log('✅ Account settings updated successfully');
-            } else {
-                throw new Error(result.message || 'Failed to update settings');
-            }
-        } catch (error) {
-            console.error('❌ Settings update error:', error);
-            setError(error.message || 'Failed to update settings');
+            const result = await updateProfile(form);
+            if (!result?.success) throw new Error(result?.message || 'Failed to save');
+            setSuccess('Settings saved.');
+        } catch (err) {
+            setError(err.message || 'Failed to save settings');
         } finally {
             setLoading(false);
         }
     };
 
+    const sectionCard = (children) => (
+        <Box
+            sx={{
+                p: { xs: 2.5, md: 3 },
+                borderRadius: 3,
+                border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                background: theme.palette.background.paper,
+                boxShadow: theme.tokens?.shadow?.sm,
+            }}
+        >
+            {children}
+        </Box>
+    );
+
     return (
-        <Container maxWidth="md" sx={{ py: 4 }}>
-            <Typography variant="h4" component="h1" gutterBottom>
-                ⚙️ Account Settings
-            </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-                Manage your account preferences and personal information
-            </Typography>
+        <Box>
+            <PageHeader
+                eyebrow="SETTINGS"
+                title="Account settings"
+                subtitle="Preferences, notifications, and identity — all in one place."
+                icon={<TuneIcon />}
+                actions={
+                    <Button variant="outlined" onClick={() => navigate('/profile')}>
+                        Back to profile
+                    </Button>
+                }
+            />
 
-            {error && (
-                <Alert severity="error" sx={{ mb: 3 }}>
-                    {error}
-                </Alert>
-            )}
+            <Container maxWidth="md" sx={{ py: 4 }}>
+                {error && (
+                    <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+                        {error}
+                    </Alert>
+                )}
+                {success && (
+                    <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>
+                        {success}
+                    </Alert>
+                )}
 
-            {success && (
-                <Alert severity="success" sx={{ mb: 3 }}>
-                    {success}
-                </Alert>
-            )}
-
-            <Box component="form" onSubmit={handleSubmit}>
-                {/* Personal Information */}
-                <Card sx={{ mb: 3 }}>
-                    <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <PersonIcon /> Personal Information
-                        </Typography>
-
-                        <Grid container spacing={2}>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    label="Username"
-                                    name="username"
-                                    value={formData.username}
-                                    onChange={handleInputChange}
-                                    margin="normal"
-                                    required
-                                    helperText="Your unique username (visible to everyone)"
-                                />
+                <Box component="form" onSubmit={handleSubmit}>
+                    {/* Profile basics */}
+                    <Section title="Profile basics" icon={<PersonIcon />} dense>
+                        {sectionCard(
+                            <Grid container spacing={2}>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        label="Username"
+                                        name="username"
+                                        value={form.username}
+                                        onChange={change}
+                                        required
+                                        helperText="Appears in profile URLs."
+                                    />
+                                </Grid>
+                                <Grid item xs={12} sm={6}>
+                                    <TextField
+                                        fullWidth
+                                        label="Display name"
+                                        name="displayName"
+                                        value={form.displayName}
+                                        onChange={change}
+                                        helperText="Optional — shown on your profile."
+                                    />
+                                </Grid>
+                                <Grid item xs={12}>
+                                    <TextField
+                                        fullWidth
+                                        label="Email"
+                                        value={user?.email || ''}
+                                        disabled
+                                        helperText="Contact support to change your account email."
+                                    />
+                                </Grid>
+                                <Grid item xs={12}>
+                                    <TextField
+                                        fullWidth
+                                        label="Bio"
+                                        name="bio"
+                                        value={form.bio}
+                                        onChange={change}
+                                        multiline
+                                        rows={3}
+                                        inputProps={{ maxLength: 280 }}
+                                        helperText={`${form.bio.length}/280`}
+                                    />
+                                </Grid>
                             </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    label="Display Name"
-                                    name="displayName"
-                                    value={formData.displayName}
-                                    onChange={handleInputChange}
-                                    margin="normal"
-                                    helperText="Name shown to other users (optional)"
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label="Email Address"
-                                    name="email"
-                                    value={formData.email}
-                                    onChange={handleInputChange}
-                                    margin="normal"
-                                    type="email"
-                                    disabled
-                                    helperText="Email cannot be changed from settings"
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label="Bio"
-                                    name="bio"
-                                    value={formData.bio}
-                                    onChange={handleInputChange}
-                                    margin="normal"
-                                    multiline
-                                    rows={3}
-                                    placeholder="Tell others about yourself..."
-                                    helperText={`${formData.bio.length}/500 characters`}
-                                    inputProps={{ maxLength: 500 }}
-                                />
-                            </Grid>
-                        </Grid>
-                    </CardContent>
-                </Card>
+                        )}
+                    </Section>
 
-                {/* Appearance Settings */}
-                <Card sx={{ mb: 3 }}>
-                    <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <PaletteIcon sx={{ color: '#ec4899' }} /> Appearance
-                        </Typography>
-
-                        <List>
-                            <ListItem>
-                                <ListItemIcon>
-                                    {mode === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
-                                </ListItemIcon>
-                                <ListItemText
-                                    primary="Theme"
-                                    secondary={`Current: ${mode === 'dark' ? 'Dark' : 'Light'} theme`}
-                                />
-                                <ListItemSecondaryAction>
-                                    <Box sx={{ display: 'flex', gap: 1 }}>
-                                        <Chip
-                                            icon={<LightModeIcon />}
-                                            label="Light"
-                                            clickable
-                                            color={formData.theme === 'light' ? 'primary' : 'default'}
-                                            onClick={() => handleThemeChange('light')}
-                                        />
-                                        <Chip
-                                            icon={<DarkModeIcon />}
-                                            label="Dark"
-                                            clickable
-                                            color={formData.theme === 'dark' ? 'primary' : 'default'}
-                                            onClick={() => handleThemeChange('dark')}
-                                        />
+                    {/* Appearance */}
+                    <Section title="Appearance" icon={<PaletteIcon />} dense>
+                        {sectionCard(
+                            <Stack spacing={2.5}>
+                                <Stack
+                                    direction={{ xs: 'column', sm: 'row' }}
+                                    justifyContent="space-between"
+                                    alignItems={{ sm: 'center' }}
+                                    spacing={2}
+                                >
+                                    <Box>
+                                        <Typography sx={{ fontWeight: 700 }}>Theme mode</Typography>
+                                        <Typography
+                                            variant="caption"
+                                            sx={{ color: theme.palette.text.secondary }}
+                                        >
+                                            Currently: {mode === 'dark' ? 'Dark' : 'Light'}
+                                        </Typography>
                                     </Box>
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                        </List>
-                    </CardContent>
-                </Card>
+                                    <Button
+                                        variant="outlined"
+                                        startIcon={
+                                            mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />
+                                        }
+                                        onClick={toggleTheme}
+                                        sx={{ fontWeight: 700 }}
+                                    >
+                                        Switch to {mode === 'dark' ? 'light' : 'dark'}
+                                    </Button>
+                                </Stack>
+                                <Divider />
+                                <Box>
+                                    <Typography sx={{ fontWeight: 700, mb: 1 }}>
+                                        Color scheme
+                                    </Typography>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{
+                                            color: theme.palette.text.secondary,
+                                            display: 'block',
+                                            mb: 1.5,
+                                        }}
+                                    >
+                                        Pick an accent palette. Affects gradients and highlights.
+                                    </Typography>
+                                    <ColorSchemeSelector />
+                                </Box>
+                            </Stack>
+                        )}
+                    </Section>
 
-                {/* Notification Settings */}
-                <Card sx={{ mb: 3 }}>
-                    <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <NotificationsIcon /> Notifications
-                        </Typography>
-
-                        <List>
-                            <ListItem>
-                                <ListItemIcon>
-                                    <NotificationsIcon />
-                                </ListItemIcon>
-                                <ListItemText
-                                    primary="Push Notifications"
-                                    secondary="Receive notifications about likes, comments, and follows"
+                    {/* Notifications */}
+                    <Section
+                        title="Notifications"
+                        icon={<NotificationsIcon />}
+                        dense
+                    >
+                        {sectionCard(
+                            <Stack spacing={2}>
+                                <FormControlLabel
+                                    control={
+                                        <Switch
+                                            checked={form.notifications}
+                                            onChange={change}
+                                            name="notifications"
+                                        />
+                                    }
+                                    label={
+                                        <Box>
+                                            <Typography sx={{ fontWeight: 700 }}>
+                                                In-app notifications
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{ color: theme.palette.text.secondary }}
+                                            >
+                                                Likes, follows, comments — anything happening to
+                                                your memes.
+                                            </Typography>
+                                        </Box>
+                                    }
+                                    sx={{ alignItems: 'flex-start', ml: 0 }}
                                 />
-                                <ListItemSecondaryAction>
-                                    <Switch
-                                        edge="end"
-                                        name="notifications"
-                                        checked={formData.notifications}
-                                        onChange={handleInputChange}
-                                    />
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                            <ListItem>
-                                <ListItemIcon>
-                                    <EmailIcon />
-                                </ListItemIcon>
-                                <ListItemText
-                                    primary="Email Notifications"
-                                    secondary="Receive email updates about your account activity"
+                                <FormControlLabel
+                                    control={
+                                        <Switch
+                                            checked={form.emailNotifications}
+                                            onChange={change}
+                                            name="emailNotifications"
+                                        />
+                                    }
+                                    label={
+                                        <Box>
+                                            <Typography sx={{ fontWeight: 700 }}>
+                                                Email digest
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{ color: theme.palette.text.secondary }}
+                                            >
+                                                A weekly summary — big moments only, no spam.
+                                            </Typography>
+                                        </Box>
+                                    }
+                                    sx={{ alignItems: 'flex-start', ml: 0 }}
                                 />
-                                <ListItemSecondaryAction>
-                                    <Switch
-                                        edge="end"
-                                        name="emailNotifications"
-                                        checked={formData.emailNotifications}
-                                        onChange={handleInputChange}
-                                    />
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                        </List>
-                    </CardContent>
-                </Card>
+                            </Stack>
+                        )}
+                    </Section>
 
-                {/* Privacy & Data Settings */}
-                <Card sx={{ mb: 3 }}>
-                    <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <SecurityIcon /> Privacy & Data
-                        </Typography>
-
-                        <FormControl fullWidth margin="normal">
-                            <InputLabel>Language</InputLabel>
-                            <Select
-                                name="language"
-                                value={formData.language}
-                                onChange={handleInputChange}
+                    {/* Language */}
+                    <Section title="Language & region" icon={<LanguageIcon />} dense>
+                        {sectionCard(
+                            <TextField
+                                select
+                                fullWidth
                                 label="Language"
+                                name="language"
+                                value={form.language}
+                                onChange={change}
+                                helperText="Affects the interface. Content is user-generated and multilingual."
                             >
-                                <MenuItem value="en">English</MenuItem>
-                                <MenuItem value="es">Español</MenuItem>
-                                <MenuItem value="fr">Français</MenuItem>
-                                <MenuItem value="de">Deutsch</MenuItem>
-                                <MenuItem value="it">Italiano</MenuItem>
-                                <MenuItem value="pt">Português</MenuItem>
-                            </Select>
-                        </FormControl>
+                                {LANGUAGES.map((l) => (
+                                    <MenuItem key={l.value} value={l.value}>
+                                        {l.label}
+                                    </MenuItem>
+                                ))}
+                            </TextField>
+                        )}
+                    </Section>
 
-                        <FormControl fullWidth margin="normal">
-                            <InputLabel>Data Usage</InputLabel>
-                            <Select
-                                name="dataUsage"
-                                value={formData.dataUsage}
-                                onChange={handleInputChange}
-                                label="Data Usage"
-                            >
-                                <MenuItem value="low">Low Quality (Save Data)</MenuItem>
-                                <MenuItem value="standard">Standard Quality</MenuItem>
-                                <MenuItem value="high">High Quality</MenuItem>
-                            </Select>
-                        </FormControl>
-                    </CardContent>
-                </Card>
-
-                {/* Action Buttons */}
-                <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                    <Button
-                        variant="outlined"
-                        onClick={() => navigate('/profile')}
-                        disabled={loading}
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        type="submit"
-                        variant="contained"
-                        startIcon={<SaveIcon />}
-                        disabled={loading}
-                    >
-                        {loading ? 'Saving...' : 'Save Settings'}
-                    </Button>
+                    <Stack direction="row" justifyContent="flex-end" sx={{ mt: 4, mb: 6 }}>
+                        <Button
+                            type="submit"
+                            variant="contained"
+                            size="large"
+                            startIcon={
+                                loading ? (
+                                    <CircularProgress size={18} color="inherit" />
+                                ) : (
+                                    <SaveIcon />
+                                )
+                            }
+                            disabled={loading}
+                            sx={{ fontWeight: 800, minWidth: 180 }}
+                        >
+                            {loading ? 'Saving…' : 'Save settings'}
+                        </Button>
+                    </Stack>
                 </Box>
-            </Box>
-        </Container>
+
+                {/* Data & privacy */}
+                <Section title="Data & privacy" icon={<SecurityIcon />} dense>
+                    <Box
+                        sx={{
+                            p: { xs: 2.5, md: 3 },
+                            borderRadius: 3,
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            background: theme.palette.brand?.surfaceSubtle,
+                        }}
+                    >
+                        <Stack spacing={2}>
+                            <Stack
+                                direction={{ xs: 'column', sm: 'row' }}
+                                justifyContent="space-between"
+                                alignItems={{ sm: 'center' }}
+                                spacing={2}
+                            >
+                                <Box>
+                                    <Typography sx={{ fontWeight: 800 }}>
+                                        Download your data
+                                    </Typography>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{ color: theme.palette.text.secondary }}
+                                    >
+                                        Get a JSON export of your memes, comments, and account data.
+                                    </Typography>
+                                </Box>
+                                <Button
+                                    variant="outlined"
+                                    startIcon={<DownloadIcon />}
+                                    disabled
+                                >
+                                    Coming soon
+                                </Button>
+                            </Stack>
+                            <Divider />
+                            <Stack
+                                direction={{ xs: 'column', sm: 'row' }}
+                                justifyContent="space-between"
+                                alignItems={{ sm: 'center' }}
+                                spacing={2}
+                            >
+                                <Box>
+                                    <Typography sx={{ fontWeight: 800, color: theme.palette.error.main }}>
+                                        Delete account
+                                    </Typography>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{ color: theme.palette.text.secondary }}
+                                    >
+                                        Remove everything — memes, comments, account. Permanent.
+                                    </Typography>
+                                </Box>
+                                <Button
+                                    variant="outlined"
+                                    color="error"
+                                    startIcon={<DeleteIcon />}
+                                    disabled
+                                >
+                                    Coming soon
+                                </Button>
+                            </Stack>
+                        </Stack>
+                    </Box>
+                </Section>
+            </Container>
+        </Box>
     );
 };
 

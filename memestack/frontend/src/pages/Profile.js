@@ -1,560 +1,409 @@
-// 👤 Profile Page Component
-// User profile management
+// ============================================================================
+// Profile — the logged-in user's own profile at /profile.
+// ----------------------------------------------------------------------------
+// Identity card (avatar, name, bio, join date) + stat strip + quick links to
+// folders, feed, analytics, and account settings. Public-user profiles (viewed
+// by *other* people) live at /users/:id and are rendered by a different page.
+// ============================================================================
 
 import React from 'react';
 import {
-    Container,
-    Typography,
     Box,
-    Card,
-    CardContent,
+    Container,
+    Grid,
+    Stack,
+    Typography,
+    Button,
     Avatar,
     Chip,
-    Grid,
-    Button,
     Divider,
-    Paper,
-    useTheme,
-    Fade,
-    Zoom,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     Edit as EditIcon,
-    CalendarToday as CalendarIcon,
     Settings as SettingsIcon,
+    CalendarToday as CalendarIcon,
+    PhotoLibrary as GalleryIcon,
+    Favorite as FavoriteIcon,
+    Visibility as ViewIcon,
+    Share as ShareIcon,
+    FolderOpen as FolderIcon,
+    Timeline as AnalyticsIcon,
+    RssFeed as FeedIcon,
+    Group as GroupIcon,
+    EmojiEvents as ChallengeIcon,
+    BookmarkBorder as BookmarkIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
-import { useThemeMode } from '../contexts/ThemeContext';
+import { PageHeader, StatCard, Section } from '../components/common';
+
+const formatDate = (value) => {
+    if (!value) return 'Unknown';
+    return new Date(value).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
+};
 
 const Profile = () => {
-    const navigate = useNavigate();
     const theme = useTheme();
-    const { mode, currentThemeColors } = useThemeMode();
+    const navigate = useNavigate();
     const { user } = useAuth();
 
-    const handleEditProfile = () => {
-        navigate('/profile/edit');
-    };
+    const stats = user?.stats || {};
+    const profile = user?.profile || {};
+    const userId = user?._id || user?.id;
 
-    const formatJoinDate = (date) => {
-        if (!date) return 'Unknown';
-        return new Date(date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-    };
+    const statCards = [
+        {
+            key: 'memes',
+            title: 'Memes created',
+            value: stats.memesCreated ?? 0,
+            icon: <GalleryIcon sx={{ color: theme.palette.primary.main }} />,
+        },
+        {
+            key: 'likes',
+            title: 'Likes received',
+            value: stats.totalLikes ?? 0,
+            icon: <FavoriteIcon sx={{ color: theme.palette.error.main }} />,
+        },
+        {
+            key: 'views',
+            title: 'Total views',
+            value: stats.totalViews ?? 0,
+            icon: <ViewIcon sx={{ color: theme.palette.info.main }} />,
+        },
+        {
+            key: 'shares',
+            title: 'Shares',
+            value: stats.totalShares ?? 0,
+            icon: <ShareIcon sx={{ color: theme.palette.secondary.main }} />,
+        },
+    ];
+
+    const quickLinks = [
+        {
+            title: 'Folders',
+            description: 'Organize memes into collections.',
+            icon: <FolderIcon />,
+            to: '/folders',
+            tint: theme.palette.primary.main,
+        },
+        {
+            title: 'Analytics',
+            description: 'Likes, views, and shares over time.',
+            icon: <AnalyticsIcon />,
+            to: '/analytics',
+            tint: theme.palette.info.main,
+        },
+        {
+            title: 'Following feed',
+            description: 'Memes from the creators you follow.',
+            icon: <FeedIcon />,
+            to: '/feed',
+            tint: theme.palette.secondary.main,
+        },
+        {
+            title: 'Groups',
+            description: 'Your meme crews and shared boards.',
+            icon: <GroupIcon />,
+            to: '/groups',
+            tint: theme.palette.warning.main,
+        },
+        {
+            title: 'Challenges',
+            description: 'Active weekly themes and leaderboards.',
+            icon: <ChallengeIcon />,
+            to: '/challenges',
+            tint: theme.palette.brand?.accent || theme.palette.primary.main,
+        },
+        {
+            title: 'Saved',
+            description: 'Memes and templates you bookmarked.',
+            icon: <BookmarkIcon />,
+            to: '/saved',
+            tint: theme.palette.success.main,
+        },
+    ];
 
     return (
-        <Box sx={{ 
-            minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#0f172a',
-        }}>
-            <Container maxWidth="md" sx={{ py: 4 }}>
-                <Fade in={true} timeout={1000}>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            background: mode === 'dark'
-                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                            backdropFilter: 'blur(50px)',
-                            WebkitBackdropFilter: 'blur(50px)',
-                            border: mode === 'dark'
-                                ? '2px solid rgba(255, 255, 255, 0.3)'
-                                : '2px solid rgba(0, 0, 0, 0.15)',
-                            borderTop: mode === 'dark'
-                                ? '3px solid rgba(255, 255, 255, 0.4)'
-                                : '3px solid rgba(0, 0, 0, 0.2)',
-                            borderRadius: '24px',
-                            boxShadow: mode === 'dark'
-                                ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                            position: 'relative',
-                            overflow: 'hidden',
-                            transition: 'all 0.3s ease',
-                            '&:hover': {
-                                transform: 'translateY(-2px)',
-                                background: mode === 'dark'
-                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                border: mode === 'dark'
-                                    ? '2px solid rgba(255, 255, 255, 0.4)'
-                                    : '2px solid rgba(0, 0, 0, 0.25)',
-                                borderTop: mode === 'dark'
-                                    ? '3px solid rgba(255, 255, 255, 0.5)'
-                                    : '3px solid rgba(0, 0, 0, 0.3)',
-                                boxShadow: mode === 'dark'
-                                    ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                    : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                            },
-                            '&::before': {
-                                content: '""',
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                height: '4px',
-                                background: `linear-gradient(90deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.secondary || '#8b5cf6'} 50%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                            },
-                        }}
-                    >
-                        <CardContent sx={{ p: 4 }}>
-                            {/* Enhanced Header with Edit Button */}
-                            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 4, position: 'relative' }}>
-                                <Typography 
-                                    variant="h3" 
-                                    component="h1"
-                                    sx={{
-                                        fontWeight: 800,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 1.5,
-                                    }}
-                                >
-                                    {/* Person Emoji - Separate for Natural Colors */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            fontSize: 'inherit',
-                                            filter: 'hue-rotate(0deg) saturate(1.0) brightness(1.0)',
-                                            '&:hover': {
-                                                transform: 'scale(1.1) rotate(2deg)',
-                                                transition: 'transform 0.3s ease',
-                                            },
-                                        }}
-                                    >
-                                        👤
-                                    </Box>
-                                    
-                                    {/* My Profile Text with Gradient */}
-                                    <Box
-                                        component="span"
-                                        sx={{
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'} 0%, ${currentThemeColors?.accent || '#ec4899'} 100%)`,
-                                            backgroundClip: 'text',
-                                            WebkitBackgroundClip: 'text',
-                                            color: 'transparent',
-                                            // Fallback for browsers that don't support background-clip
-                                            '@supports not (-webkit-background-clip: text)': {
-                                                background: 'none',
-                                                color: currentThemeColors?.primary || '#6366f1',
-                                            },
-                                        }}
-                                    >
-                                        My Profile
-                                    </Box>
-                                </Typography>
-                                
-                                {/* Edit Button - Positioned absolutely to top right */}
-                                <Box sx={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: 2 }}>
-                                    <Button
-                                        variant="contained"
-                                        startIcon={<EditIcon sx={{ color: 'inherit' }} />}
-                                        onClick={handleEditProfile}
-                                        sx={{
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                            borderRadius: '12px',
-                                            px: 3,
-                                            py: 1.5,
-                                            fontWeight: 600,
-                                            textTransform: 'none',
-                                            boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                            '&:hover': {
-                                                background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#5b5bf6'}, ${currentThemeColors?.secondary || '#7c3aed'})`,
-                                                boxShadow: `0 12px 40px ${currentThemeColors?.primary || '#6366f1'}60`,
-                                            },
-                                        }}
-                                    >
-                                        Edit Profile
-                                    </Button>
-                                    <Button
-                                        variant="outlined"
-                                        startIcon={<SettingsIcon sx={{ color: 'inherit' }} />}
-                                        onClick={() => navigate('/settings')}
-                                        sx={{
-                                            borderColor: theme.palette.primary.main,
-                                            color: theme.palette.primary.main,
-                                            borderRadius: '12px',
-                                            px: 3,
-                                            py: 1.5,
-                                            fontWeight: 600,
-                                            textTransform: 'none',
-                                            '&:hover': {
-                                                background: 'rgba(99, 102, 241, 0.1)',
-                                                borderColor: theme.palette.primary.dark,
-                                            },
-                                        }}
-                                    >
-                                        Settings
-                                    </Button>
-                                </Box>
-                            </Box>
+        <Box>
+            <PageHeader
+                eyebrow="PROFILE"
+                title="Your profile"
+                subtitle="Your public identity on MemeStack — plus quick access to your stuff."
+                actions={
+                    <>
+                        <Button
+                            variant="outlined"
+                            startIcon={<SettingsIcon />}
+                            onClick={() => navigate('/settings')}
+                        >
+                            Settings
+                        </Button>
+                        <Button
+                            variant="contained"
+                            startIcon={<EditIcon />}
+                            onClick={() => navigate('/profile/edit')}
+                        >
+                            Edit profile
+                        </Button>
+                    </>
+                }
+            />
 
-                            {/* Enhanced Profile Header */}
-                            <Zoom in={true} timeout={1200}>
-                                <Box sx={{ textAlign: 'center', mb: 4 }}>
-                                    <Avatar
-                                        sx={{ 
-                                            width: 120, 
-                                            height: 120, 
-                                            mx: 'auto', 
-                                            mb: 3,
-                                            fontSize: '3rem',
-                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                            border: `4px solid ${currentThemeColors?.primary || '#6366f1'}30`,
-                                            boxShadow: `0 8px 32px ${currentThemeColors?.primary || '#6366f1'}50`,
-                                        }}
-                                        src={user?.profile?.avatar}
-                                    >
-                                        {user?.username?.charAt(0).toUpperCase()}
-                                    </Avatar>
-                                    
-                                    <Typography 
-                                        variant="h4" 
-                                        gutterBottom
-                                        sx={{ 
+            <Container maxWidth="lg" sx={{ py: 4 }}>
+                {/* Identity card */}
+                <Box
+                    sx={{
+                        p: { xs: 3, md: 4 },
+                        borderRadius: 3,
+                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                        background: theme.palette.background.paper,
+                        boxShadow: theme.tokens?.shadow?.md,
+                        mb: 4,
+                    }}
+                >
+                    <Grid container spacing={3} alignItems="center">
+                        <Grid item xs={12} sm="auto">
+                            <Avatar
+                                src={profile.avatar}
+                                sx={{
+                                    width: 112,
+                                    height: 112,
+                                    fontSize: '2.75rem',
+                                    fontWeight: 900,
+                                    background: theme.palette.brand?.gradient,
+                                    border: `3px solid ${theme.palette.brand?.border}`,
+                                    boxShadow: theme.tokens?.shadow?.md,
+                                }}
+                            >
+                                {(profile.displayName || user?.username || '?')
+                                    .charAt(0)
+                                    .toUpperCase()}
+                            </Avatar>
+                        </Grid>
+                        <Grid item xs={12} sm>
+                            <Stack spacing={1}>
+                                <Typography
+                                    variant="h4"
+                                    sx={{ fontWeight: 900, letterSpacing: '-0.02em' }}
+                                >
+                                    {profile.displayName || user?.username || 'You'}
+                                </Typography>
+                                {user?.username && (
+                                    <Typography
+                                        sx={{
                                             fontWeight: 700,
-                                            color: theme.palette.text.primary,
-                                        }}
-                                    >
-                                        {user?.profile?.displayName || user?.username}
-                                    </Typography>
-                                    
-                                    {user?.profile?.displayName && (
-                                        <Typography 
-                                            variant="h6" 
-                                            gutterBottom
-                                            sx={{ 
-                                                color: theme.palette.text.secondary,
-                                                fontWeight: 500,
-                                            }}
-                                        >
-                                            @{user?.username}
-                                        </Typography>
-                                    )}
-                                    
-                                    <Typography 
-                                        variant="body1" 
-                                        sx={{ 
-                                            mb: 2,
                                             color: theme.palette.text.secondary,
                                         }}
                                     >
-                                        {user?.email}
+                                        @{user.username}
                                     </Typography>
-
-                                    {user?.profile?.bio && (
-                                        <Typography 
-                                            variant="body1" 
-                                            sx={{ 
-                                                mb: 3, 
-                                                maxWidth: 500, 
-                                                mx: 'auto',
-                                                color: theme.palette.text.primary,
-                                                lineHeight: 1.6,
-                                            }}
-                                        >
-                                            {user.profile.bio}
-                                        </Typography>
-                                    )}
-
-                                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-                                        <Chip 
-                                            icon={<CalendarIcon />}
-                                            label={`Joined ${formatJoinDate(user?.profile?.joinDate || user?.createdAt)}`} 
-                                            sx={{
-                                                background: mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                backdropFilter: 'blur(20px)',
-                                                WebkitBackdropFilter: 'blur(20px)',
-                                                border: mode === 'dark'
-                                                    ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                    : '1px solid rgba(0, 0, 0, 0.2)',
-                                                color: `${currentThemeColors?.primary || '#6366f1'}`,
-                                                fontWeight: 700,
-                                                fontSize: '0.875rem',
-                                                boxShadow: mode === 'dark'
-                                                    ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                    : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                '& .MuiChip-label': {
-                                                    color: mode === 'dark' ? 'white' : 'black',
-                                                    fontWeight: 700,
-                                                },
-                                                '& .MuiChip-icon': {
-                                                    color: `${currentThemeColors?.primary || '#6366f1'}`
-                                                }
-                                            }}
+                                )}
+                                {profile.bio && (
+                                    <Typography
+                                        sx={{
+                                            color: theme.palette.text.secondary,
+                                            maxWidth: 640,
+                                            mt: 0.5,
+                                        }}
+                                    >
+                                        {profile.bio}
+                                    </Typography>
+                                )}
+                                <Stack
+                                    direction="row"
+                                    spacing={1.5}
+                                    alignItems="center"
+                                    sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}
+                                >
+                                    <Chip
+                                        icon={<CalendarIcon sx={{ fontSize: 16 }} />}
+                                        label={`Joined ${formatDate(user?.createdAt)}`}
+                                        size="small"
+                                        variant="outlined"
+                                        sx={{ fontWeight: 700 }}
+                                    />
+                                    {user?.role && user.role !== 'user' && (
+                                        <Chip
+                                            label={user.role.toUpperCase()}
+                                            size="small"
+                                            color="secondary"
+                                            sx={{ fontWeight: 800 }}
                                         />
-                                        {user?.preferences?.theme && (
-                                            <Chip 
-                                                label={`${user.preferences.theme === 'dark' ? '🌙' : '🌞'} ${user.preferences.theme} theme`} 
-                                                variant="outlined"
-                                                sx={{
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.4) 100%)',
-                                                    backdropFilter: 'blur(20px)',
-                                                    WebkitBackdropFilter: 'blur(20px)',
-                                                    border: mode === 'dark'
-                                                        ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                        : '1px solid rgba(0, 0, 0, 0.2)',
-                                                    color: mode === 'dark' ? 'white' : 'black',
-                                                    fontWeight: 700,
-                                                    fontSize: '0.875rem',
-                                                    boxShadow: mode === 'dark'
-                                                        ? 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                        : 'inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                }}
-                                            />
-                                        )}
+                                    )}
+                                    {userId && (
+                                        <Button
+                                            size="small"
+                                            variant="text"
+                                            onClick={() => navigate(`/users/${userId}`)}
+                                            sx={{ fontWeight: 700 }}
+                                        >
+                                            View as public
+                                        </Button>
+                                    )}
+                                </Stack>
+                            </Stack>
+                        </Grid>
+                    </Grid>
+                </Box>
+
+                {/* Stats */}
+                <Grid container spacing={2.5} sx={{ mb: 1 }}>
+                    {statCards.map((s) => (
+                        <Grid key={s.key} item xs={6} md={3}>
+                            <StatCard
+                                variant="detailed"
+                                title={s.title}
+                                value={s.value}
+                                icon={s.icon}
+                            />
+                        </Grid>
+                    ))}
+                </Grid>
+
+                {/* Quick links */}
+                <Section
+                    title="Your stuff"
+                    subtitle="Jump back into the parts of MemeStack you use most."
+                >
+                    <Grid container spacing={2.5}>
+                        {quickLinks.map((link) => (
+                            <Grid key={link.title} item xs={12} sm={6} md={4}>
+                                <Box
+                                    onClick={() => navigate(link.to)}
+                                    sx={{
+                                        cursor: 'pointer',
+                                        p: 3,
+                                        height: '100%',
+                                        borderRadius: 3,
+                                        border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                                        background: theme.palette.background.paper,
+                                        boxShadow: theme.tokens?.shadow?.sm,
+                                        transition: 'transform 140ms ease, box-shadow 140ms ease',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 1.25,
+                                        '&:hover': {
+                                            transform: 'translate(-2px, -2px)',
+                                            boxShadow: theme.tokens?.shadow?.md,
+                                        },
+                                    }}
+                                >
+                                    <Box
+                                        sx={{
+                                            width: 44,
+                                            height: 44,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: 2,
+                                            border: `2px solid ${theme.palette.brand?.border}`,
+                                            background: link.tint,
+                                            color: '#fff',
+                                            boxShadow: theme.tokens?.shadow?.sm,
+                                        }}
+                                    >
+                                        {link.icon}
                                     </Box>
+                                    <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                                        {link.title}
+                                    </Typography>
+                                    <Typography
+                                        variant="body2"
+                                        sx={{ color: theme.palette.text.secondary }}
+                                    >
+                                        {link.description}
+                                    </Typography>
                                 </Box>
-                            </Zoom>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Section>
 
-                            <Divider sx={{ my: 4, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
-
-                            {/* Enhanced Stats Section */}
-                            <Box sx={{ mb: 4 }}>
-                                <Typography 
-                                    variant="h5" 
-                                    gutterBottom 
-                                    sx={{ 
-                                        textAlign: 'center',
-                                        fontWeight: 700,
-                                        color: theme.palette.text.primary,
-                                        mb: 3,
+                {/* Account info strip */}
+                <Section title="Account" subtitle="Your sign-in details. Edit in settings." dense>
+                    <Box
+                        sx={{
+                            p: 3,
+                            borderRadius: 3,
+                            border: `2px solid ${theme.palette.brand?.border || theme.palette.divider}`,
+                            background: theme.palette.brand?.surfaceSubtle,
+                        }}
+                    >
+                        <Grid container spacing={2}>
+                            <Grid item xs={12} sm={4}>
+                                <Typography
+                                    variant="caption"
+                                    sx={{
+                                        display: 'block',
+                                        fontWeight: 800,
+                                        color: theme.palette.text.secondary,
+                                        letterSpacing: '0.08em',
                                     }}
                                 >
-                                    📊 Your Stats
+                                    USERNAME
                                 </Typography>
-                                
-                                <Grid container spacing={3} justifyContent="center">
-                                    {[
-                                        { label: 'Memes Created', value: user?.stats?.memesCreated || 0, icon: '🎨' },
-                                        { label: 'Total Likes', value: user?.stats?.totalLikes || 0, icon: '❤️' },
-                                        { label: 'Total Views', value: user?.stats?.totalViews || 0, icon: '👀' },
-                                        { label: 'Total Shares', value: user?.stats?.totalShares || 0, icon: '📤' },
-                                    ].map((stat, index) => (
-                                        <Grid item xs={6} sm={3} key={stat.label}>
-                                            <Zoom in={true} timeout={1400 + index * 200}>
-                                                <Paper
-                                                    elevation={0}
-                                                    sx={{
-                                                        p: 3,
-                                                        textAlign: 'center',
-                                                        background: mode === 'dark'
-                                                            ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                            : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                                        backdropFilter: 'blur(40px)',
-                                                        WebkitBackdropFilter: 'blur(40px)',
-                                                        border: mode === 'dark'
-                                                            ? '2px solid rgba(255, 255, 255, 0.3)'
-                                                            : '2px solid rgba(0, 0, 0, 0.15)',
-                                                        borderTop: mode === 'dark'
-                                                            ? '3px solid rgba(255, 255, 255, 0.4)'
-                                                            : '3px solid rgba(0, 0, 0, 0.2)',
-                                                        borderRadius: '16px',
-                                                        boxShadow: mode === 'dark'
-                                                            ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                            : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                        transition: 'all 0.3s ease',
-                                                        '&:hover': {
-                                                            transform: 'translateY(-4px)',
-                                                            background: mode === 'dark'
-                                                                ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                                            border: mode === 'dark'
-                                                                ? '2px solid rgba(255, 255, 255, 0.4)'
-                                                                : '2px solid rgba(0, 0, 0, 0.25)',
-                                                            borderTop: mode === 'dark'
-                                                                ? '3px solid rgba(255, 255, 255, 0.5)'
-                                                                : '3px solid rgba(0, 0, 0, 0.3)',
-                                                            boxShadow: mode === 'dark'
-                                                                ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                                                : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                                        },
-                                                    }}
-                                                >
-                                                    <Typography 
-                                                        variant="h6" 
-                                                        sx={{ mb: 1, fontSize: '2rem' }}
-                                                    >
-                                                        {stat.icon}
-                                                    </Typography>
-                                                    <Typography 
-                                                        variant="h4" 
-                                                        sx={{ 
-                                                            fontWeight: 800,
-                                                            background: `linear-gradient(135deg, ${currentThemeColors?.primary || '#6366f1'}, ${currentThemeColors?.secondary || '#8b5cf6'})`,
-                                                            backgroundClip: 'text',
-                                                            WebkitBackgroundClip: 'text',
-                                                            color: 'transparent',
-                                                            mb: 1,
-                                                        }}
-                                                    >
-                                                        {stat.value}
-                                                    </Typography>
-                                                    <Typography 
-                                                        variant="body2" 
-                                                        sx={{ 
-                                                            color: theme.palette.text.secondary,
-                                                            fontWeight: 500,
-                                                        }}
-                                                    >
-                                                        {stat.label}
-                                                    </Typography>
-                                                </Paper>
-                                            </Zoom>
-                                        </Grid>
-                                    ))}
-                                </Grid>
-                            </Box>
-
-                            {/* Enhanced Account Info */}
-                            <Divider sx={{ my: 4, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
-                            
-                            <Box>
-                                <Typography 
-                                    variant="h5" 
-                                    gutterBottom 
-                                    sx={{ 
-                                        textAlign: 'center',
-                                        fontWeight: 700,
-                                        color: theme.palette.text.primary,
-                                        mb: 3,
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {user?.username || '—'}
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4}>
+                                <Typography
+                                    variant="caption"
+                                    sx={{
+                                        display: 'block',
+                                        fontWeight: 800,
+                                        color: theme.palette.text.secondary,
+                                        letterSpacing: '0.08em',
                                     }}
                                 >
-                                    ⚙️ Account Settings
+                                    EMAIL
                                 </Typography>
-                                
-                                <Grid container spacing={3}>
-                                    <Grid item xs={12} sm={6}>
-                                        <Paper
-                                            elevation={0}
-                                            sx={{
-                                                p: 3,
-                                                background: mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                                backdropFilter: 'blur(40px)',
-                                                WebkitBackdropFilter: 'blur(40px)',
-                                                border: mode === 'dark'
-                                                    ? '2px solid rgba(255, 255, 255, 0.3)'
-                                                    : '2px solid rgba(0, 0, 0, 0.15)',
-                                                borderTop: mode === 'dark'
-                                                    ? '3px solid rgba(255, 255, 255, 0.4)'
-                                                    : '3px solid rgba(0, 0, 0, 0.2)',
-                                                borderRadius: '16px',
-                                                boxShadow: mode === 'dark'
-                                                    ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                    : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                transition: 'all 0.3s ease',
-                                                '&:hover': {
-                                                    transform: 'translateY(-2px)',
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                                    border: mode === 'dark'
-                                                        ? '2px solid rgba(255, 255, 255, 0.4)'
-                                                        : '2px solid rgba(0, 0, 0, 0.25)',
-                                                    borderTop: mode === 'dark'
-                                                        ? '3px solid rgba(255, 255, 255, 0.5)'
-                                                        : '3px solid rgba(0, 0, 0, 0.3)',
-                                                    boxShadow: mode === 'dark'
-                                                        ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                                        : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                                },
-                                            }}
-                                        >
-                                            <Typography 
-                                                variant="body2" 
-                                                sx={{ 
-                                                    color: theme.palette.text.secondary,
-                                                    fontWeight: 600,
-                                                    mb: 1,
-                                                }}
-                                            >
-                                                Theme Preference
-                                            </Typography>
-                                            <Typography 
-                                                variant="body1"
-                                                sx={{ 
-                                                    color: theme.palette.text.primary,
-                                                    fontWeight: 500,
-                                                }}
-                                            >
-                                                {user?.preferences?.theme === 'dark' ? '🌙 Dark' : '🌞 Light'}
-                                            </Typography>
-                                        </Paper>
-                                    </Grid>
-                                    <Grid item xs={12} sm={6}>
-                                        <Paper
-                                            elevation={0}
-                                            sx={{
-                                                p: 3,
-                                                background: mode === 'dark'
-                                                    ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.1) 100%)'
-                                                    : 'linear-gradient(145deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%)',
-                                                backdropFilter: 'blur(40px)',
-                                                WebkitBackdropFilter: 'blur(40px)',
-                                                border: mode === 'dark'
-                                                    ? '2px solid rgba(255, 255, 255, 0.3)'
-                                                    : '2px solid rgba(0, 0, 0, 0.15)',
-                                                borderTop: mode === 'dark'
-                                                    ? '3px solid rgba(255, 255, 255, 0.4)'
-                                                    : '3px solid rgba(0, 0, 0, 0.2)',
-                                                borderRadius: '16px',
-                                                boxShadow: mode === 'dark'
-                                                    ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                                                    : '0 8px 32px rgba(31, 38, 135, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
-                                                transition: 'all 0.3s ease',
-                                                '&:hover': {
-                                                    transform: 'translateY(-2px)',
-                                                    background: mode === 'dark'
-                                                        ? 'linear-gradient(145deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.15) 100%)'
-                                                        : 'linear-gradient(145deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.25) 100%)',
-                                                    border: mode === 'dark'
-                                                        ? '2px solid rgba(255, 255, 255, 0.4)'
-                                                        : '2px solid rgba(0, 0, 0, 0.25)',
-                                                    borderTop: mode === 'dark'
-                                                        ? '3px solid rgba(255, 255, 255, 0.5)'
-                                                        : '3px solid rgba(0, 0, 0, 0.3)',
-                                                    boxShadow: mode === 'dark'
-                                                        ? '0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                                                        : '0 16px 48px rgba(31, 38, 135, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
-                                                },
-                                            }}
-                                        >
-                                            <Typography 
-                                                variant="body2" 
-                                                sx={{ 
-                                                    color: theme.palette.text.secondary,
-                                                    fontWeight: 600,
-                                                    mb: 1,
-                                                }}
-                                            >
-                                                Notifications
-                                            </Typography>
-                                            <Typography 
-                                                variant="body1"
-                                                sx={{ 
-                                                    color: theme.palette.text.primary,
-                                                    fontWeight: 500,
-                                                }}
-                                            >
-                                                {user?.preferences?.notifications ? '🔔 Enabled' : '🔕 Disabled'}
-                                            </Typography>
-                                        </Paper>
-                                    </Grid>
-                                </Grid>
-                            </Box>
-                        </CardContent>
-                    </Paper>
-                </Fade>
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {user?.email || '—'}
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4}>
+                                <Typography
+                                    variant="caption"
+                                    sx={{
+                                        display: 'block',
+                                        fontWeight: 800,
+                                        color: theme.palette.text.secondary,
+                                        letterSpacing: '0.08em',
+                                    }}
+                                >
+                                    MEMBER SINCE
+                                </Typography>
+                                <Typography sx={{ fontWeight: 700 }}>
+                                    {formatDate(user?.createdAt)}
+                                </Typography>
+                            </Grid>
+                        </Grid>
+                        <Divider sx={{ my: 2 }} />
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                            <Button
+                                variant="outlined"
+                                startIcon={<EditIcon />}
+                                onClick={() => navigate('/profile/edit')}
+                            >
+                                Edit profile
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                startIcon={<SettingsIcon />}
+                                onClick={() => navigate('/settings')}
+                            >
+                                Account settings
+                            </Button>
+                        </Stack>
+                    </Box>
+                </Section>
             </Container>
         </Box>
     );
